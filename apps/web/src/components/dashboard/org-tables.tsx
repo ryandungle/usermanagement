@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError, type Client, type Company, type Me, type Office } from "@/lib/api";
 import { ConfirmDialog } from "./user-dialogs";
@@ -18,7 +19,12 @@ interface Config<T extends Entity> {
   countLabel: string;
   count: (t: T) => number | undefined;
   list: () => Promise<{ data: T[] }>;
-  create?: (name: string) => Promise<unknown>;
+  /** Create with the chosen parent id (empty string when the entity has no parent). */
+  create?: (name: string, parentId: string) => Promise<unknown>;
+  /** Fixed parent id when the table is already filtered; otherwise the dialog asks. */
+  parentId?: string;
+  /** Parent picker shown in the create dialog when parentId is not fixed. */
+  parent?: { label: string; options: () => Promise<{ id: string; name: string }[]> };
   rename?: (t: T, name: string) => Promise<unknown>;
   remove?: (t: T) => Promise<unknown>;
   open?: (t: T) => void;
@@ -31,6 +37,15 @@ function EntityTable<T extends Entity>({ cfg, onChanged }: { cfg: Config<T>; onC
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ kind: "create" } | { kind: "rename"; item: T } | { kind: "delete"; item: T } | null>(null);
   const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [parents, setParents] = useState<{ id: string; name: string }[]>([]);
+
+  const needsParentPick = !!cfg.parent && !cfg.parentId;
+  useEffect(() => {
+    if (dialog?.kind === "create" && needsParentPick) {
+      cfg.parent!.options().then(setParents).catch(() => setParents([]));
+    }
+  }, [dialog?.kind, needsParentPick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -63,7 +78,11 @@ function EntityTable<T extends Entity>({ cfg, onChanged }: { cfg: Config<T>; onC
     e.preventDefault();
     const n = name.trim();
     if (!n || !dialog) return;
-    if (dialog.kind === "create" && cfg.create) void run(() => cfg.create!(n));
+    if (dialog.kind === "create" && cfg.create) {
+      const pid = cfg.parentId ?? parentId;
+      if (needsParentPick && !pid) return;
+      void run(() => cfg.create!(n, pid));
+    }
     if (dialog.kind === "rename" && cfg.rename) void run(() => cfg.rename!(dialog.item, n));
     setDialog(null);
     setName("");
@@ -74,7 +93,7 @@ function EntityTable<T extends Entity>({ cfg, onChanged }: { cfg: Config<T>; onC
       <div className="flex items-center gap-2">
         <p className="text-muted-foreground text-sm">{items.length} {items.length === 1 ? cfg.label : cfg.plural}</p>
         {cfg.create && (
-          <Button size="sm" className="ml-auto" onClick={() => { setName(""); setDialog({ kind: "create" }); }}>
+          <Button size="sm" className="ml-auto" onClick={() => { setName(""); setParentId(""); setDialog({ kind: "create" }); }}>
             <PlusIcon />
             Add {cfg.label}
           </Button>
@@ -141,13 +160,25 @@ function EntityTable<T extends Entity>({ cfg, onChanged }: { cfg: Config<T>; onC
           <DialogContent className="sm:max-w-sm">
             <form onSubmit={submitName} className="grid gap-4">
               <DialogHeader><DialogTitle>{dialog.kind === "create" ? `New ${cfg.label}` : `Rename ${dialog.item.name}`}</DialogTitle></DialogHeader>
+              {dialog.kind === "create" && needsParentPick && (
+                <div className="grid gap-2">
+                  <Label>{cfg.parent!.label}</Label>
+                  <Select value={parentId} onValueChange={setParentId}>
+                    <SelectTrigger><SelectValue placeholder={`Select a ${cfg.parent!.label.toLowerCase()}`} /></SelectTrigger>
+                    <SelectContent>
+                      {parents.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {parents.length === 0 && <p className="text-muted-foreground text-xs">No {cfg.parent!.label.toLowerCase()} available yet. Create one first.</p>}
+                </div>
+              )}
               <div className="grid gap-2">
                 <Label htmlFor="entity-name">Name</Label>
                 <Input id="entity-name" autoFocus required value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
-                <Button type="submit">{dialog.kind === "create" ? "Create" : "Save"}</Button>
+                <Button type="submit" disabled={dialog.kind === "create" && needsParentPick && !parentId}>{dialog.kind === "create" ? "Create" : "Save"}</Button>
               </DialogFooter>
             </form>
           </DialogContent>
@@ -188,7 +219,9 @@ export function CompaniesTable({ me, clientId, onChanged }: { me: Me; clientId?:
     label: "company", plural: "companies", countLabel: "Offices",
     count: (c) => c.officeCount,
     list: useCallback(() => api.listCompanies(clientId), [clientId]),
-    create: me.permissions.canCreateCompanies && (clientId || me.actor.clientId) ? (n) => api.createCompany((clientId ?? me.actor.clientId)!, n) : undefined,
+    create: me.permissions.canCreateCompanies ? (n, pid) => api.createCompany(pid, n) : undefined,
+    parentId: clientId ?? me.actor.clientId ?? undefined,
+    parent: { label: "Client", options: () => api.listClients().then((r) => r.data) },
     rename: me.permissions.canCreateOffices ? (c, n) => api.renameCompany(c.id, n) : undefined,
     remove: me.permissions.canCreateCompanies ? (c) => api.deleteCompany(c.id) : undefined,
     open: (c) => navigate({ to: "/", search: { tab: "offices", clientId: c.clientId, companyId: c.id } }),
@@ -203,7 +236,9 @@ export function OfficesTable({ me, clientId, companyId, onChanged }: { me: Me; c
     label: "office", plural: "offices", countLabel: "Users",
     count: (o) => o.userCount,
     list: useCallback(() => api.listOffices({ companyId, clientId }), [companyId, clientId]),
-    create: me.permissions.canCreateOffices && (companyId || me.actor.companyId) ? (n) => api.createOffice((companyId ?? me.actor.companyId)!, n) : undefined,
+    create: me.permissions.canCreateOffices ? (n, pid) => api.createOffice(pid, n) : undefined,
+    parentId: companyId ?? me.actor.companyId ?? undefined,
+    parent: { label: "Company", options: () => api.listCompanies(clientId).then((r) => r.data.map((c) => ({ id: c.id, name: c.clientName ? `${c.clientName} › ${c.name}` : c.name }))) },
     rename: me.permissions.canManageUsers ? (o, n) => api.renameOffice(o.id, n) : undefined,
     remove: me.permissions.canCreateOffices ? (o) => api.deleteOffice(o.id) : undefined,
     open: me.permissions.canManageUsers ? (o) => navigate({ to: "/", search: { tab: "users", officeId: o.id } }) : undefined,
