@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PMS_LABEL } from "@usermanagement/shared";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -135,7 +136,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base"><AlertTriangleIcon className="size-4 text-amber-500" /> Unapplied payments</CardTitle>
               <CardDescription>
-                Money received that has not been allocated to a charge in Denticon. It still counts toward the balance but leaves the treatments below showing as unpaid until it is applied.
+                Money received that is not applied to any charge in {PMS_LABEL[detail.pmsType] ?? "the practice system"}. It still counts toward the balance but is not covering any treatment below.
               </CardDescription>
             </CardHeader>
             <CardContent>

@@ -227,6 +227,7 @@ export interface PatientDetail {
   notes: string[];
   pmsBalance?: number | null;
   allocationSource?: string;
+  pmsType: PmsType;
 }
 
 export type ProcedureGroupBy = "none" | "patient" | "date" | "both";

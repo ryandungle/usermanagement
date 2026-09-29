@@ -295,7 +295,7 @@ export const connectorRoute = new Hono<AppEnv>()
     try {
       const detail = (await pool(c, r.office.officeId).getPatient(row.urlEncrypted, row.database, pmsConfigOf(row), patientId)) as unknown as PatientDetail | null;
       if (!detail) return c.json({ error: "Patient not found" }, 404);
-      return c.json({ data: detail });
+      return c.json({ data: { ...detail, pmsType: pmsConfigOf(row).type } });
     } catch (err) {
       return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
     }
