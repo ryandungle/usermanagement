@@ -18,9 +18,13 @@ const putBody = z.object({
   database: z.string().trim().min(1).max(120).optional(),
 });
 
+export const PATIENT_SORTS = ["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"] as const;
+
 const patientsQuery = z.object({
   q: z.string().trim().max(200).optional(),
   active: z.enum(["true", "false"]).optional(),
+  sort: z.enum(PATIENT_SORTS).default("lastName"),
+  order: z.enum(["asc", "desc"]).default("asc"),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -179,13 +183,15 @@ export const connectorRoute = new Hono<AppEnv>()
     if (!query.success) return c.json({ error: "Invalid query", issues: query.error.issues }, 400);
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
-    const { q, active, page, pageSize } = query.data;
+    const { q, active, page, pageSize, sort, order } = query.data;
     try {
       const result = (await pool(c, r.office.officeId).listPatients(row.urlEncrypted, row.database, {
         q,
         page,
         pageSize,
         activeOnly: active === "true",
+        sort,
+        order,
       })) as { patients: PatientSummary[]; total: number };
       return c.json({
         data: result.patients,

@@ -10,10 +10,13 @@ export function ColumnPicker({
   fields,
   value,
   onChange,
+  labels,
 }: {
   fields: string[];
   value: string[];
   onChange: (next: string[]) => void;
+  /** Optional display labels; defaults to the raw field name. */
+  labels?: Record<string, string>;
 }) {
   const [open, setOpen] = React.useState(false);
   const selected = new Set(value);
@@ -39,11 +42,11 @@ export function ColumnPicker({
             <CommandEmpty>No field matches.</CommandEmpty>
             <CommandGroup>
               {fields.map((f) => (
-                <CommandItem key={f} value={f} onSelect={() => toggle(f)}>
+                <CommandItem key={f} value={labels?.[f] ?? f} onSelect={() => toggle(f)}>
                   <span className={cn("border-primary flex size-4 items-center justify-center rounded-sm border", selected.has(f) ? "bg-primary text-primary-foreground" : "opacity-50")}>
                     {selected.has(f) && <CheckIcon className="size-3" />}
                   </span>
-                  <span className="truncate font-mono text-xs">{f}</span>
+                  <span className={labels ? "truncate text-sm" : "truncate font-mono text-xs"}>{labels?.[f] ?? f}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

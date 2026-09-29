@@ -149,7 +149,7 @@ export class MongoPool extends DurableObject<PoolEnv> {
   async listPatients(
     urlEncrypted: string,
     database: string,
-    query: { q?: string; page: number; pageSize: number; activeOnly?: boolean },
+    query: { q?: string; page: number; pageSize: number; activeOnly?: boolean; sort?: string; order?: "asc" | "desc" },
   ): Promise<{ patients: PatientSummary[]; total: number }> {
     return this.withClient(urlEncrypted, async (client) => {
       const coll = client.db(database).collection(DENTICON.patients);
@@ -161,10 +161,16 @@ export class MongoPool extends DurableObject<PoolEnv> {
         and.push({ $or: [{ firstName: rx }, { lastName: rx }, { nickname: rx }, { patientId: rx }, { cellPhone: rx }, { homePhone: rx }, { email: rx }, { chartNo: rx }] });
       }
       const filter: Document = and.length ? { $and: and } : {};
+      const SORTABLE = new Set(["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"]);
+      const sortField = query.sort && SORTABLE.has(query.sort) ? query.sort : "lastName";
+      const dir = query.order === "desc" ? -1 : 1;
+      const sort: Record<string, 1 | -1> = { [sortField]: dir };
+      if (sortField !== "lastName") sort.lastName = 1;
+      if (sortField !== "firstName") sort.firstName = 1;
       const [docs, total] = await Promise.all([
         coll
           .find(filter, { projection: PATIENT_PROJECTION })
-          .sort({ lastName: 1, firstName: 1 })
+          .sort(sort)
           .skip((query.page - 1) * query.pageSize)
           .limit(query.pageSize)
           .toArray(),

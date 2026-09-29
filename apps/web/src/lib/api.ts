@@ -46,7 +46,11 @@ export interface Office {
   createdAt?: string;
   updatedAt?: string;
   userCount?: number;
+  hasConnector?: boolean;
+  connectorStatus?: string | null;
 }
+
+export type PatientSort = "lastName" | "firstName" | "patientId" | "birthDate" | "lastVisitDate" | "city";
 
 export interface Me {
   user: { id: string; name: string; email: string; role: Role; createdAt: string };
@@ -288,7 +292,7 @@ export const api = {
     request<DocsPage>(`/api/offices/${officeId}/data/${encodeURIComponent(collection)}${qs({ ...params })}`),
 
   // patients (Denticon collections through the office connector)
-  listPatients: (officeId: string, params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number }) =>
+  listPatients: (officeId: string, params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number; sort?: PatientSort; order?: "asc" | "desc" }) =>
     request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
   getPatient: (officeId: string, patientId: string) =>
     request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),

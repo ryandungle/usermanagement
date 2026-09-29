@@ -74,6 +74,8 @@ const patientsRoute = createRoute({
     q: typeof s.q === "string" && s.q ? s.q : undefined,
     page: typeof s.page === "number" && s.page > 1 ? s.page : undefined,
     active: s.active === "false" ? "false" : undefined,
+    sort: ["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"].includes(s.sort as string) ? (s.sort as PatientsSearch["sort"]) : undefined,
+    order: s.order === "desc" ? "desc" : undefined,
   }),
   beforeLoad: managerGuard,
   component: function PatientsRoute() {

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, asc, client, company, count, createDb, eq, inArray, office, userOffice } from "@usermanagement/db";
+import { and, asc, client, company, count, createDb, eq, inArray, office, officeConnector, sql, userOffice } from "@usermanagement/db";
 import { scopeContains } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
 import { officeAsScope, resolveCompany, resolveOffice } from "../lib/scope.js";
@@ -36,11 +36,14 @@ export const officesRoute = new Hono<AppEnv>()
         createdAt: office.createdAt,
         updatedAt: office.updatedAt,
         userCount: count(userOffice.userId),
+        hasConnector: sql<boolean>`${officeConnector.officeId} is not null`,
+        connectorStatus: officeConnector.status,
       })
       .from(office)
       .innerJoin(company, eq(company.id, office.companyId))
       .innerJoin(client, eq(client.id, company.clientId))
       .leftJoin(userOffice, eq(userOffice.officeId, office.id))
+      .leftJoin(officeConnector, eq(officeConnector.officeId, office.id))
       .where(
         and(
           companyId ? eq(office.companyId, companyId) : undefined,
@@ -48,7 +51,7 @@ export const officesRoute = new Hono<AppEnv>()
           actor.officeIds.length ? inArray(office.id, actor.officeIds) : undefined,
         ),
       )
-      .groupBy(office.id, company.name, company.clientId, client.name)
+      .groupBy(office.id, company.name, company.clientId, client.name, officeConnector.officeId, officeConnector.status)
       .orderBy(asc(office.name));
     return c.json({ data: rows });
   })

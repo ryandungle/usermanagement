@@ -4,6 +4,7 @@ import {
   BuildingIcon,
   Building2Icon,
   CircleHelpIcon,
+  HeartPulseIcon,
   LayoutDashboardIcon,
   MapPinIcon,
   PlusCircleIcon,
@@ -26,6 +27,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
+import { api, type Office } from "@/lib/api";
 import { useMe } from "@/lib/me";
 
 type Tab = "users" | "clients" | "companies" | "offices";
@@ -38,6 +40,28 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 
   const canManage = me?.permissions.canManageUsers ?? false;
   const level = me?.scope.level ?? "office";
+
+  // Offices with a database connector get a Patients entry (last used office wins).
+  const [connected, setConnected] = React.useState<Office[]>([]);
+  const patientsOffice = React.useMemo(() => {
+    if (connected.length === 0) return null;
+    let remembered: string | null = null;
+    try {
+      remembered = localStorage.getItem("um-patients-office");
+    } catch {}
+    return connected.find((o) => o.id === remembered) ?? connected[0]!;
+  }, [connected, pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => {
+    if (!canManage) return setConnected([]);
+    let cancelled = false;
+    api
+      .listOffices({})
+      .then((r) => { if (!cancelled) setConnected(r.data.filter((o) => o.hasConnector)); })
+      .catch(() => { if (!cancelled) setConnected([]); });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManage, pathname]);
 
   const orgItems: { key: Tab; title: string; icon: React.ElementType; show: boolean }[] = [
     { key: "clients", title: "Clients", icon: ShieldCheckIcon, show: level === "global" },
@@ -124,6 +148,25 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {patientsOffice && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Clinical</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Patients" isActive={pathname.includes("/patients")}>
+                    <Link to="/offices/$officeId/patients" params={{ officeId: patientsOffice.id }} search={{}}>
+                      <HeartPulseIcon />
+                      <span>Patients</span>
+                      {connected.length > 1 && <span className="text-muted-foreground ml-auto truncate text-xs">{patientsOffice.name}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
