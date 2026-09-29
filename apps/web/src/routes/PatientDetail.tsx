@@ -102,7 +102,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
           <Stat label="Partially paid" value={String(totals.partial)} sub="some money applied" tone={totals.partial ? "warn" : undefined} />
           <Stat label="Unpaid" value={String(totals.unpaid)} sub="nothing applied yet" tone={totals.unpaid ? "bad" : undefined} />
           <Stat label="Payments" value={money(totals.payments)} sub={`${payments.length} payment${payments.length === 1 ? "" : "s"}${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`} />
-          <Stat label="Balance" value={money(totals.balance)} sub={`after ${money(totals.adjustments)} adjustments`} tone={totals.balance > 0 ? "bad" : undefined} />
+          <Stat label="Balance" value={money(totals.balance)} sub={totals.adjustments ? `after ${money(Math.abs(totals.adjustments))} in adjustments` : totals.balance > 0 ? "outstanding" : "settled"} tone={totals.balance > 0 ? "bad" : undefined} />
         </div>
 
         <Tabs defaultValue="treatments">
