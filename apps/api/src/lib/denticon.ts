@@ -88,6 +88,8 @@ export type PaidStatus = "paid" | "partial" | "unpaid" | "none";
 
 export interface Allocation {
   id: string;
+  /** Denticon's own allocation id. */
+  paymentAllocationId: string | null;
   paymentLedgerId: string;
   procedureLedgerId: string | null;
   amount: number;
@@ -95,6 +97,17 @@ export interface Allocation {
   ledgerType: string | null;
   claimId: string | null;
   date: string;
+}
+
+/** An allocation row joined with the ledger line on the other side of it. */
+export interface AllocationLink extends Allocation {
+  /** The linked line: the paying payment/adjustment (on a procedure) or the settled charge (on a payment). */
+  linkedLedgerId: string | null;
+  linkedDescription: string;
+  linkedCode: string | null;
+  linkedDate: string;
+  linkedKind: LedgerKind | null;
+  linkedSource: PaymentSource | null;
 }
 
 export interface ProcedurePayment {
@@ -106,7 +119,8 @@ export interface ProcedurePayment {
   adjusted: number;
   remaining: number;
   status: PaidStatus;
-  allocations: Allocation[];
+  /** Which payments/adjustments settled this charge. */
+  allocations: AllocationLink[];
 }
 
 export interface LedgerLine {
@@ -133,8 +147,8 @@ export interface LedgerLine {
   source?: PaymentSource;
   /** Procedures only: how much of this charge has been paid. */
   payment?: ProcedurePayment;
-  /** Payments/adjustments only: how this money was applied. */
-  applied?: { total: number; unallocated: number; procedures: number };
+  /** Payments/adjustments only: how this money was applied, with the charges it settled. */
+  applied?: { total: number; unallocated: number; procedures: number; items: AllocationLink[] };
 }
 
 export interface Visit {
@@ -211,6 +225,7 @@ export function toAllocation(d: Document): Allocation {
   const s = (k: string) => (typeof a[k] === "string" && a[k] !== "" ? (a[k] as string) : null);
   return {
     id: String(a._id),
+    paymentAllocationId: s("paymentAllocationId"),
     paymentLedgerId: s("paymentLedgerId") ?? "",
     procedureLedgerId: s("procedureLedgerId"),
     amount: typeof a.amount === "number" ? a.amount : 0,
@@ -227,6 +242,20 @@ export function toAllocation(d: Document): Allocation {
 export function applyAllocations(lines: LedgerLine[], allocations: Allocation[]): void {
   // Insurance is recognised by the allocation's claim id or by the paying line being an insurance payment.
   const insuranceLedgerIds = new Set(lines.filter((l) => l.kind === "payment" && l.source === "insurance" && l.ledgerId).map((l) => l.ledgerId!));
+  const byLedgerId = new Map<string, LedgerLine>();
+  for (const l of lines) if (l.ledgerId) byLedgerId.set(l.ledgerId, l);
+  const link = (a: Allocation, otherId: string | null): AllocationLink => {
+    const other = otherId ? byLedgerId.get(otherId) : undefined;
+    return {
+      ...a,
+      linkedLedgerId: otherId,
+      linkedDescription: other?.description ?? (otherId ? `Ledger ${otherId} (not on this chart)` : "Unallocated"),
+      linkedCode: other?.code ?? null,
+      linkedDate: other?.date ?? a.date,
+      linkedKind: other?.kind ?? null,
+      linkedSource: other?.source ?? null,
+    };
+  };
   const byProcedure = new Map<string, Allocation[]>();
   const byPayment = new Map<string, Allocation[]>();
   for (const a of allocations) {
@@ -251,7 +280,15 @@ export function applyAllocations(lines: LedgerLine[], allocations: Allocation[])
       const remaining = round2(Math.max(0, line.amount - paid - adjusted));
       const status: PaidStatus =
         line.amount <= 0 ? "none" : remaining <= 0.005 ? "paid" : paid + adjusted > 0 ? "partial" : "unpaid";
-      line.payment = { paid, insurancePaid, patientPaid: round2(paid - insurancePaid), adjusted, remaining, status, allocations: allocs };
+      line.payment = {
+        paid,
+        insurancePaid,
+        patientPaid: round2(paid - insurancePaid),
+        adjusted,
+        remaining,
+        status,
+        allocations: allocs.map((a) => link(a, a.paymentLedgerId)),
+      };
     } else if (line.kind === "payment" || line.kind === "adjustment") {
       const allocs = byPayment.get(line.ledgerId) ?? [];
       const total = round2(allocs.reduce((s, a) => s + Math.abs(a.amount), 0));
@@ -259,6 +296,7 @@ export function applyAllocations(lines: LedgerLine[], allocations: Allocation[])
         total,
         unallocated: round2(Math.max(0, Math.abs(line.amount) - total)),
         procedures: new Set(allocs.map((a) => a.procedureLedgerId).filter(Boolean)).size,
+        items: allocs.map((a) => link(a, a.procedureLedgerId)),
       };
     }
   }

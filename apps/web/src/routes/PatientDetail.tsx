@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteHeader } from "@/components/site-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, ApiError, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { api, ApiError, type AllocationLink, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
 import { rememberedPatientsSearch } from "./Patients";
@@ -232,6 +233,63 @@ function VisitCard({ visit }: { visit: Visit }) {
   );
 }
 
+/**
+ * Lists the allocation rows behind a paid amount or an "applied to" count.
+ * `side` says what the linked line is: the charge a payment settled, or the
+ * payment/adjustment that settled a charge.
+ */
+function AllocationPopover({ title, description, items, side, children }: {
+  title: string;
+  description: string;
+  items: AllocationLink[];
+  side: "procedure" | "payment";
+  children: React.ReactNode;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className="decoration-muted-foreground/50 hover:decoration-foreground underline decoration-dotted underline-offset-4">{children}</button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[28rem] max-w-[calc(100vw-2rem)] p-0" align="end" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b px-4 py-3">
+          <div className="text-sm font-medium">{title}</div>
+          <p className="text-muted-foreground mt-0.5 text-xs">{description}</p>
+        </div>
+        <Table>
+          <TableHeader className="bg-muted">
+            <TableRow>
+              <TableHead>Date</TableHead>
+              {side === "procedure" && <TableHead>Code</TableHead>}
+              <TableHead>{side === "procedure" ? "Procedure" : "Payment"}</TableHead>
+              <TableHead className="text-right">Allocated</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell className="text-muted-foreground whitespace-nowrap text-xs">{dateLabel(a.linkedDate)}</TableCell>
+                {side === "procedure" && <TableCell className="font-mono text-xs">{a.linkedCode ?? ""}</TableCell>}
+                <TableCell className="text-xs">
+                  {a.linkedDescription}
+                  {side === "payment" && (
+                    <span className="text-muted-foreground ml-1">
+                      {a.ledgerType === "A" ? "(write-off)" : a.linkedSource === "insurance" || a.claimId ? "(insurance)" : a.linkedSource === "patient" ? "(patient)" : ""}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right text-xs tabular-nums">{money(Math.abs(a.amount))}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <div className="text-muted-foreground border-t px-4 py-2 text-[11px]">
+          Source: denticon-payment-allocations · {items.length} row{items.length === 1 ? "" : "s"} · ids {items.map((a) => a.paymentAllocationId ?? a.id).join(", ").slice(0, 80)}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="grid gap-2">
@@ -264,13 +322,37 @@ function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[
       case "paid": {
         const p = l.payment;
         if (!p) return "";
-        const parts = [p.insurancePaid ? `ins ${money(p.insurancePaid)}` : null, p.patientPaid ? `pt ${money(p.patientPaid)}` : null, p.adjusted ? `adj ${money(p.adjusted)}` : null].filter(Boolean).join(" · ");
-        return <span title={parts}>{money(p.paid + p.adjusted)}</span>;
+        if (p.allocations.length === 0) return money(0);
+        return (
+          <AllocationPopover
+            title="Settled by"
+            description={`${money(p.paid)} paid${p.adjusted ? ` and ${money(p.adjusted)} written off` : ""} against this ${money(l.amount)} charge.`}
+            items={p.allocations}
+            side="payment"
+          >
+            {money(p.paid + p.adjusted)}
+          </AllocationPopover>
+        );
       }
       case "remaining": return l.payment ? money(l.payment.remaining) : "";
       case "status": return <PaidBadge status={l.payment?.status} />;
       case "source": return l.source ? <Badge variant="outline" className="text-muted-foreground px-1.5">{l.source === "insurance" ? "Insurance" : l.source === "patient" ? "Patient" : "Other"}</Badge> : "";
-      case "applied": return l.applied ? `${l.applied.procedures} procedure${l.applied.procedures === 1 ? "" : "s"}${l.applied.unallocated ? ` · ${money(l.applied.unallocated)} unapplied` : ""}` : "";
+      case "applied": {
+        const a = l.applied;
+        if (!a) return "";
+        const label = `${a.procedures} procedure${a.procedures === 1 ? "" : "s"}${a.unallocated ? ` · ${money(a.unallocated)} unapplied` : ""}`;
+        if (a.items.length === 0) return label;
+        return (
+          <AllocationPopover
+            title="Applied to"
+            description={`${money(a.total)} of this ${money(Math.abs(l.amount))} ${l.kind} was allocated to the charges below.${a.unallocated ? ` ${money(a.unallocated)} is not applied to anything yet.` : ""}`}
+            items={a.items}
+            side="procedure"
+          >
+            {label}
+          </AllocationPopover>
+        );
+      }
       case "date": return dateLabel(l.date);
       case "code": return l.code ?? "";
       case "description": return l.description;

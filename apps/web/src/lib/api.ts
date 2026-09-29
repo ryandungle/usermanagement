@@ -115,12 +115,23 @@ export type PaidStatus = "paid" | "partial" | "unpaid" | "none";
 
 export interface Allocation {
   id: string;
+  /** Denticon's own allocation id. */
+  paymentAllocationId: string | null;
   paymentLedgerId: string;
   procedureLedgerId: string | null;
   amount: number;
   ledgerType: string | null;
   claimId: string | null;
   date: string;
+}
+
+export interface AllocationLink extends Allocation {
+  linkedLedgerId: string | null;
+  linkedDescription: string;
+  linkedCode: string | null;
+  linkedDate: string;
+  linkedKind: LedgerKind | null;
+  linkedSource: "insurance" | "patient" | "other" | null;
 }
 
 export interface ProcedurePayment {
@@ -130,7 +141,7 @@ export interface ProcedurePayment {
   adjusted: number;
   remaining: number;
   status: PaidStatus;
-  allocations: Allocation[];
+  allocations: AllocationLink[];
 }
 
 export interface LedgerLine {
@@ -155,7 +166,7 @@ export interface LedgerLine {
   estimatedPatient: number | null;
   source?: "insurance" | "patient" | "other";
   payment?: ProcedurePayment;
-  applied?: { total: number; unallocated: number; procedures: number };
+  applied?: { total: number; unallocated: number; procedures: number; items: AllocationLink[] };
 }
 
 export interface Visit {
