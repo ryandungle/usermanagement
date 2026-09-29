@@ -1,5 +1,5 @@
 import type { Db, Document } from "mongodb";
-import type { PmsMapping } from "@usermanagement/shared";
+import { properName, type PmsMapping } from "@usermanagement/shared";
 import {
   INSURANCE_PROJECTION,
   PATIENT_PROJECTION,
@@ -30,7 +30,7 @@ async function providersMap(db: Db, m: PmsMapping): Promise<Record<string, strin
 async function patientNames(db: Db, m: PmsMapping, ids: string[]): Promise<Map<string, string>> {
   if (ids.length === 0) return new Map();
   const docs = await db.collection(m.patients!).find({ patientId: { $in: ids } }, { projection: { patientId: 1, firstName: 1, lastName: 1 } }).toArray();
-  return new Map(docs.map((p) => [String(p.patientId), [p.firstName, p.lastName].filter(Boolean).join(" ")]));
+  return new Map(docs.map((p) => [String(p.patientId), [properName(p.firstName), properName(p.lastName)].filter(Boolean).join(" ")]));
 }
 
 export const denticonAdapter: PmsAdapter = {

@@ -1,5 +1,6 @@
 import type { Document } from "mongodb";
 import { toPlain } from "./mongo.js";
+import { properName } from "@usermanagement/shared";
 
 /** Collections the patient pages read (Denticon export). */
 export const DENTICON = {
@@ -124,8 +125,8 @@ export function toPatientSummary(d: Document): PatientSummary {
   return {
     id: String(p._id),
     patientId: String(p.patientId ?? ""),
-    firstName: s("firstName") ?? "",
-    lastName: s("lastName") ?? "",
+    firstName: properName(s("firstName")),
+    lastName: properName(s("lastName")),
     birthDate: s("birthDate"),
     sex: s("sex"),
     cellPhone: s("cellPhone"),

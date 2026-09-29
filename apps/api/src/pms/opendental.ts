@@ -1,5 +1,5 @@
 import type { Db, Document } from "mongodb";
-import type { PmsMapping } from "@usermanagement/shared";
+import { properName, type PmsMapping } from "@usermanagement/shared";
 import {
   SELF_PAY,
   groupVisits,
@@ -59,8 +59,8 @@ function summary(p: Document): PatientSummary {
   return {
     id: String(p._id),
     patientId: String(p.PatNum ?? ""),
-    firstName: str(p.FName) ?? "",
-    lastName: str(p.LName) ?? "",
+    firstName: properName(str(p.FName)),
+    lastName: properName(str(p.LName)),
     birthDate: day(p.Birthdate),
     sex: GENDER[String(p.Gender ?? "")] ?? null,
     cellPhone: str(p.WirelessPhone),
@@ -96,7 +96,7 @@ async function codesMap(db: Db, m: PmsMapping, codeNums: string[]): Promise<Map<
 async function patientNames(db: Db, m: PmsMapping, patNums: string[]): Promise<Map<string, string>> {
   if (patNums.length === 0) return new Map();
   const docs = await db.collection(m.patients!).find({ PatNum: { $in: patNums } }, { projection: { PatNum: 1, FName: 1, LName: 1 } }).toArray();
-  return new Map(docs.map((p) => [String(p.PatNum), [p.FName, p.LName].filter(Boolean).join(" ")]));
+  return new Map(docs.map((p) => [String(p.PatNum), [properName(p.FName), properName(p.LName)].filter(Boolean).join(" ")]));
 }
 
 /** patient plan → subscriber → plan → carrier, for a set of patients. */
