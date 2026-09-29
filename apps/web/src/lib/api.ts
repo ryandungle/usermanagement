@@ -304,7 +304,10 @@ export const api = {
     request<DocsPage>(`/api/offices/${officeId}/data/${encodeURIComponent(collection)}${qs({ ...params })}`),
 
   // patients (Denticon collections through the office connector)
-  listPatients: (officeId: string, params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number; sort?: PatientSort; order?: "asc" | "desc" }) =>
+  listPatients: (
+    officeId: string,
+    params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number; sort?: PatientSort; order?: "asc" | "desc"; dateField?: "lastVisitDate" | "birthDate"; from?: string; to?: string },
+  ) =>
     request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
   getPatient: (officeId: string, patientId: string) =>
     request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),

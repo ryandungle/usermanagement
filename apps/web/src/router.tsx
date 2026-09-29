@@ -76,6 +76,9 @@ const patientsRoute = createRoute({
     active: s.active === "false" ? "false" : undefined,
     sort: ["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"].includes(s.sort as string) ? (s.sort as PatientsSearch["sort"]) : undefined,
     order: s.order === "desc" ? "desc" : undefined,
+    dateField: s.dateField === "birthDate" ? "birthDate" : s.dateField === "lastVisitDate" ? "lastVisitDate" : undefined,
+    from: typeof s.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.from) ? s.from : undefined,
+    to: typeof s.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.to) ? s.to : undefined,
   }),
   beforeLoad: managerGuard,
   component: function PatientsRoute() {

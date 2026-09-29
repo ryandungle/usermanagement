@@ -149,7 +149,16 @@ export class MongoPool extends DurableObject<PoolEnv> {
   async listPatients(
     urlEncrypted: string,
     database: string,
-    query: { q?: string; page: number; pageSize: number; activeOnly?: boolean; sort?: string; order?: "asc" | "desc" },
+    query: {
+      q?: string;
+      page: number;
+      pageSize: number;
+      activeOnly?: boolean;
+      sort?: string;
+      order?: "asc" | "desc";
+      /** Inclusive YYYY-MM-DD bounds on a date field (either bound optional). */
+      dateRange?: { field: "lastVisitDate" | "birthDate"; from?: string; to?: string };
+    },
   ): Promise<{ patients: PatientSummary[]; total: number }> {
     return this.withClient(urlEncrypted, async (client) => {
       const coll = client.db(database).collection(DENTICON.patients);
@@ -159,6 +168,21 @@ export class MongoPool extends DurableObject<PoolEnv> {
       for (const w of words) {
         const rx = { $regex: w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
         and.push({ $or: [{ firstName: rx }, { lastName: rx }, { nickname: rx }, { patientId: rx }, { cellPhone: rx }, { homePhone: rx }, { email: rx }, { chartNo: rx }] });
+      }
+      if (query.dateRange) {
+        // birthDate is stored as "YYYY-MM-DD"; lastVisitDate as a BSON date. Match either representation.
+        const { field, from, to } = query.dateRange;
+        const asString: Document = {};
+        const asDate: Document = {};
+        if (from) {
+          asString.$gte = from;
+          asDate.$gte = new Date(`${from}T00:00:00.000Z`);
+        }
+        if (to) {
+          asString.$lte = `${to}\uffff`;
+          asDate.$lte = new Date(`${to}T23:59:59.999Z`);
+        }
+        and.push({ $or: [{ [field]: asString }, { [field]: asDate }] });
       }
       const filter: Document = and.length ? { $and: and } : {};
       const SORTABLE = new Set(["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"]);

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SiteHeader } from "@/components/site-header";
 import { ColumnPicker } from "@/components/office/column-picker";
+import { DateRangePicker } from "@/components/date-range-picker";
 import { api, ApiError, type Office, type Pagination, type PatientSort, type PatientSummary } from "@/lib/api";
 import { ageFrom, dateLabel, fullName } from "@/lib/format";
 import { useMe } from "@/lib/me";
@@ -39,6 +40,9 @@ export interface PatientsSearch {
   active?: "true" | "false";
   sort?: PatientSort;
   order?: "asc" | "desc";
+  dateField?: "lastVisitDate" | "birthDate";
+  from?: string;
+  to?: string;
 }
 
 type ColKey = "name" | "patientId" | "birthDate" | "sex" | "phone" | "email" | "city" | "lastVisitDate" | "status";
@@ -72,9 +76,12 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   const active = search.active ?? "true";
   const sort = search.sort ?? "lastName";
   const order = search.order ?? "asc";
+  const dateField = search.dateField ?? "lastVisitDate";
+  const from = search.from;
+  const to = search.to;
 
   // Opened with no params (sidebar, back link): restore the last state for this office.
-  const bare = !search.q && !search.page && !search.active && !search.sort && !search.order;
+  const bare = !search.q && !search.page && !search.active && !search.sort && !search.order && !search.from && !search.to;
   const [restored, setRestored] = useState(false);
   useEffect(() => {
     if (!bare) return setRestored(true);
@@ -87,8 +94,18 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!bare) rememberPatientsSearch(officeId, { q: q || undefined, page: page > 1 ? page : undefined, active: active !== "true" ? active : undefined, sort: sort !== "lastName" ? sort : undefined, order: order !== "asc" ? order : undefined });
-  }, [officeId, bare, q, page, active, sort, order]);
+    if (!bare)
+      rememberPatientsSearch(officeId, {
+        q: q || undefined,
+        page: page > 1 ? page : undefined,
+        active: active !== "true" ? active : undefined,
+        sort: sort !== "lastName" ? sort : undefined,
+        order: order !== "asc" ? order : undefined,
+        dateField: from || to ? dateField : undefined,
+        from,
+        to,
+      });
+  }, [officeId, bare, q, page, active, sort, order, dateField, from, to]);
 
   const colsKey = `um-patient-cols:${officeId}`;
   useEffect(() => {
@@ -121,7 +138,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
     setLoading(true);
     setError(null);
     try {
-      const res = await api.listPatients(officeId, { q: q || undefined, active, page, pageSize: PAGE_SIZE, sort, order });
+      const res = await api.listPatients(officeId, { q: q || undefined, active, page, pageSize: PAGE_SIZE, sort, order, dateField: from || to ? dateField : undefined, from, to });
       setRows(res.data);
       setPagination(res.pagination);
     } catch (err) {
@@ -130,7 +147,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
     } finally {
       setLoading(false);
     }
-  }, [officeId, q, active, page, sort, order]);
+  }, [officeId, q, active, page, sort, order, dateField, from, to]);
 
   useEffect(() => {
     if (restored || !bare) void load();
@@ -140,7 +157,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
     navigate({
       to: "/offices/$officeId/patients",
       params: { officeId },
-      search: { q: q || undefined, page, active, sort, order, ...next },
+      search: { q: q || undefined, page, active, sort, order, dateField: from || to ? dateField : undefined, from, to, ...next },
     });
 
   function onSearch(e: FormEvent<HTMLFormElement>) {
@@ -225,8 +242,23 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
               <SelectItem value="false">All patients</SelectItem>
             </SelectContent>
           </Select>
-          {q && (
-            <Button variant="outline" size="sm" className="h-8" onClick={() => go({ q: undefined, page: 1 })}>
+          <div className="flex items-center gap-1">
+            <Select value={dateField} onValueChange={(v) => go({ dateField: v as "lastVisitDate" | "birthDate", from: undefined, to: undefined, page: 1 })}>
+              <SelectTrigger size="sm" className="w-32" aria-label="Date field"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lastVisitDate">Last visit</SelectItem>
+                <SelectItem value="birthDate">Birth date</SelectItem>
+              </SelectContent>
+            </Select>
+            <DateRangePicker
+              value={{ from, to }}
+              onChange={(r) => go({ dateField, from: r.from, to: r.to, page: 1 })}
+              placeholder={dateField === "birthDate" ? "Any birth date" : "Any visit date"}
+              presets={dateField === "birthDate" ? "birthdays" : "visits"}
+            />
+          </div>
+          {(q || from || to) && (
+            <Button variant="outline" size="sm" className="h-8" onClick={() => go({ q: undefined, from: undefined, to: undefined, page: 1 })}>
               <XIcon /> Clear
             </Button>
           )}
