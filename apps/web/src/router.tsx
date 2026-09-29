@@ -1,11 +1,9 @@
 import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
-import { hasRank, isRole } from "@usermanagement/shared";
 import { authClient } from "./lib/auth-client";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./routes/Login";
-import { ProfilePage } from "./routes/Profile";
-import { OrgPage, type OrgSearch } from "./routes/Org";
-import { UsersPage, type UsersSearch } from "./routes/Users";
+import { SettingsPage } from "./routes/Settings";
+import { DashboardPage, type DashboardSearch, type Tab } from "./routes/Dashboard";
 
 async function currentUser() {
   const { data } = await authClient.getSession();
@@ -13,53 +11,36 @@ async function currentUser() {
 }
 
 const optionalId = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const TABS: Tab[] = ["users", "clients", "companies", "offices"];
 
 const rootRoute = createRootRoute({ component: Layout });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: async () => {
-    if (!(await currentUser())) throw redirect({ to: "/login" });
-  },
-  component: ProfilePage,
-});
-
-const orgRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/org",
-  validateSearch: (s: Record<string, unknown>): OrgSearch => ({
-    clientId: optionalId(s.clientId),
-    companyId: optionalId(s.companyId),
-  }),
-  beforeLoad: async () => {
-    const user = await currentUser();
-    if (!user) throw redirect({ to: "/login" });
-    if (!isRole(user.role) || user.role === "user") throw redirect({ to: "/" });
-  },
-  component: function OrgRoute() {
-    const search = orgRoute.useSearch();
-    return <OrgPage search={search} />;
-  },
-});
-
-const usersRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/users",
-  validateSearch: (s: Record<string, unknown>): UsersSearch => ({
+  validateSearch: (s: Record<string, unknown>): DashboardSearch => ({
+    tab: TABS.includes(s.tab as Tab) ? (s.tab as Tab) : undefined,
     clientId: optionalId(s.clientId),
     companyId: optionalId(s.companyId),
     officeId: optionalId(s.officeId),
+    create: s.create === "1" ? "1" : undefined,
   }),
   beforeLoad: async () => {
-    const user = await currentUser();
-    if (!user) throw redirect({ to: "/login" });
-    if (!isRole(user.role) || !hasRank({ role: user.role }, "office_manager")) throw redirect({ to: "/" });
+    if (!(await currentUser())) throw redirect({ to: "/login" });
   },
-  component: function UsersRoute() {
-    const search = usersRoute.useSearch();
-    return <UsersPage search={search} />;
+  component: function IndexRoute() {
+    const search = indexRoute.useSearch();
+    return <DashboardPage search={search} />;
   },
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  beforeLoad: async () => {
+    if (!(await currentUser())) throw redirect({ to: "/login" });
+  },
+  component: SettingsPage,
 });
 
 const loginRoute = createRoute({
@@ -71,7 +52,7 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, orgRoute, usersRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, settingsRoute, loginRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

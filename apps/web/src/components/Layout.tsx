@@ -1,7 +1,8 @@
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { ROLE_LABEL } from "@usermanagement/shared";
-import { signOut, useSession } from "../lib/auth-client";
-import { MeProvider, useMe } from "../lib/me";
+import { Outlet, useRouterState } from "@tanstack/react-router";
+import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { MeProvider } from "@/lib/me";
+import { useSession } from "@/lib/auth-client";
 
 export function Layout() {
   return (
@@ -12,44 +13,26 @@ export function Layout() {
 }
 
 function Shell() {
-  const { data: session, isPending } = useSession();
-  const { me } = useMe();
-  const navigate = useNavigate();
+  const { data: session } = useSession();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  async function handleSignOut() {
-    await signOut();
-    navigate({ to: "/login" });
+  if (!session?.user || pathname === "/login") {
+    return <Outlet />;
   }
 
   return (
-    <>
-      <nav className="nav">
-        <Link to="/" className="brand">
-          User Management
-        </Link>
-        {session?.user && (
-          <>
-            <Link to="/">Profile</Link>
-            {me && me.actor.role !== "user" && <Link to="/org">Organization</Link>}
-            {me?.permissions.canManageUsers && <Link to="/users">Users</Link>}
-            <span className="spacer" />
-            <span className="muted">
-              {session.user.email}
-              {me && <span className="badge" style={{ marginLeft: 8 }}>{ROLE_LABEL[me.actor.role]}</span>}
-            </span>
-            <button className="btn sm" onClick={handleSignOut}>
-              Sign out
-            </button>
-          </>
-        )}
-        {!session?.user && !isPending && (
-          <>
-            <span className="spacer" />
-            <Link to="/login">Sign in</Link>
-          </>
-        )}
-      </nav>
-      <Outlet />
-    </>
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "calc(var(--spacing) * 72)",
+          "--header-height": "calc(var(--spacing) * 12)",
+        } as React.CSSProperties
+      }
+    >
+      <AppSidebar variant="inset" />
+      <SidebarInset>
+        <Outlet />
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

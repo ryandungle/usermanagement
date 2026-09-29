@@ -61,6 +61,11 @@ export interface Me {
   };
 }
 
+export interface Overview {
+  totals: { users: number; banned: number; clients: number; companies: number; offices: number };
+  series: { date: string; newUsers: number; signIns: number }[];
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -127,6 +132,7 @@ const json = (method: string, data?: unknown): RequestInit => ({
 
 export const api = {
   me: () => request<Me>("/api/me"),
+  overview: () => request<Overview>("/api/stats/overview"),
   updateMe: (data: { name?: string; image?: string | null }) => request<{ data: unknown }>("/api/me", json("PATCH", data)),
 
   // organization tree
