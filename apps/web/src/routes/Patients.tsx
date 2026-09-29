@@ -99,11 +99,9 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   useEffect(() => {
     if (!bare) return setRestored(true);
     const remembered = rememberedPatientsSearch(officeId);
-    if (Object.keys(remembered).length > 0) {
-      navigate({ to: "/offices/$officeId/patients", params: { officeId }, search: remembered, replace: true });
-    } else {
-      setRestored(true);
-    }
+    if (Object.keys(remembered).length === 0) return setRestored(true);
+    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/patients", params: { officeId }, search: remembered, replace: true }), 0);
+    return () => window.clearTimeout(t);
   }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -138,7 +136,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   useEffect(() => {
     api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
     try {
-      localStorage.setItem("um-patients-office", officeId);
+      localStorage.setItem("um-clinical-office", officeId);
     } catch {}
   }, [officeId]);
 

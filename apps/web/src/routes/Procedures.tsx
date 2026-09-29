@@ -133,8 +133,10 @@ export function ProceduresPage({ officeId, search }: { officeId: string; search:
   useEffect(() => {
     if (!bare) return setRestored(true);
     const remembered = rememberedProceduresSearch(officeId);
-    if (Object.keys(remembered).length > 0) navigate({ to: "/offices/$officeId/procedures", params: { officeId }, search: remembered, replace: true });
-    else setRestored(true);
+    if (Object.keys(remembered).length === 0) return setRestored(true);
+    // Defer so the navigation is not swallowed by the router transition that mounted this page.
+    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/procedures", params: { officeId }, search: remembered, replace: true }), 0);
+    return () => window.clearTimeout(t);
   }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!bare) rememberProceduresSearch(officeId, search);
@@ -143,6 +145,9 @@ export function ProceduresPage({ officeId, search }: { officeId: string; search:
   useEffect(() => {
     api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
     api.listOffices({}).then((r) => setOffices(r.data.filter((o) => o.hasConnector))).catch(() => setOffices([]));
+    try {
+      localStorage.setItem("um-clinical-office", officeId);
+    } catch {}
   }, [officeId]);
 
   const load = useCallback(async () => {

@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { api, type Office } from "@/lib/api";
+import { rememberedPatientsSearch } from "@/routes/Patients";
+import { rememberedProceduresSearch } from "@/routes/Procedures";
 import { useMe } from "@/lib/me";
 
 type Tab = "users" | "clients" | "companies" | "offices";
@@ -48,7 +50,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
     if (connected.length === 0) return null;
     let remembered: string | null = null;
     try {
-      remembered = localStorage.getItem("um-patients-office");
+      remembered = localStorage.getItem("um-clinical-office");
     } catch {}
     return connected.find((o) => o.id === remembered) ?? connected[0]!;
   }, [connected, pathname]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -161,7 +163,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Patients" isActive={pathname.includes("/patients")}>
-                    <Link to="/offices/$officeId/patients" params={{ officeId: patientsOffice.id }} search={{}}>
+                    <Link to="/offices/$officeId/patients" params={{ officeId: patientsOffice.id }} search={rememberedPatientsSearch(patientsOffice.id)}>
                       <HeartPulseIcon />
                       <span>Patients</span>
                       {connected.length > 1 && <span className="text-muted-foreground ml-auto truncate text-xs">{patientsOffice.name}</span>}
@@ -170,7 +172,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Procedures" isActive={pathname.includes("/procedures")}>
-                    <Link to="/offices/$officeId/procedures" params={{ officeId: patientsOffice.id }} search={{}}>
+                    <Link to="/offices/$officeId/procedures" params={{ officeId: patientsOffice.id }} search={rememberedProceduresSearch(patientsOffice.id)}>
                       <StethoscopeIcon />
                       <span>Procedures</span>
                     </Link>
