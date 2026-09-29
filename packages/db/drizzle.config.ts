@@ -5,7 +5,7 @@ import path from "node:path";
 
 // Load the repo-root .env so `pnpm db:*` works from any workspace.
 const here = path.dirname(fileURLToPath(import.meta.url));
-config({ path: path.resolve(here, "../../.env") });
+config({ path: path.resolve(here, "../../.env"), override: !process.env.DATABASE_URL });
 
 export default defineConfig({
   dialect: "postgresql",

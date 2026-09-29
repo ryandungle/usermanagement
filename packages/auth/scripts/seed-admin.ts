@@ -13,7 +13,7 @@ import { createDb, eq, user } from "@usermanagement/db";
 import { buildAuth, createManagedUser } from "../src/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-config({ path: path.resolve(here, "../../../.env") });
+config({ path: path.resolve(here, "../../../.env"), override: !process.env.DATABASE_URL });
 
 const email = (process.argv[2] ?? process.env.ADMIN_EMAIL ?? "").trim().toLowerCase();
 const password = process.argv[3] ?? process.env.ADMIN_PASSWORD ?? "";
