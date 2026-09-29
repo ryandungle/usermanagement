@@ -45,7 +45,7 @@ export interface PatientsSearch {
   to?: string;
 }
 
-type ColKey = "name" | "patientId" | "birthDate" | "sex" | "phone" | "email" | "city" | "lastVisitDate" | "status";
+type ColKey = "name" | "patientId" | "birthDate" | "sex" | "phone" | "email" | "city" | "coverage" | "lastVisitDate" | "status";
 
 const COLUMNS: { key: ColKey; label: string; sort?: PatientSort }[] = [
   { key: "name", label: "Patient", sort: "lastName" },
@@ -55,10 +55,23 @@ const COLUMNS: { key: ColKey; label: string; sort?: PatientSort }[] = [
   { key: "phone", label: "Phone" },
   { key: "email", label: "Email" },
   { key: "city", label: "City", sort: "city" },
+  { key: "coverage", label: "Coverage" },
   { key: "lastVisitDate", label: "Last visit", sort: "lastVisitDate" },
   { key: "status", label: "Status" },
 ];
 const ALL_KEYS = COLUMNS.map((c) => c.key);
+
+export function CoverageCell({ coverage }: { coverage: PatientSummary["coverage"] }) {
+  if (coverage.kind === "self-pay") return <Badge variant="outline" className="text-muted-foreground px-1.5">Self-pay</Badge>;
+  const p = coverage.primary!;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" title={[p.groupNo ? `Group ${p.groupNo}` : null, p.relation ? `Subscriber: ${p.relation}` : null, coverage.secondary ? `Secondary: ${coverage.secondary.carrier}` : null].filter(Boolean).join(" · ")}>
+      <span className="text-foreground max-w-48 truncate">{p.carrier}</span>
+      {p.planCategory && <Badge variant="secondary" className="px-1.5">{p.planCategory}</Badge>}
+      {coverage.secondary && <Badge variant="outline" className="text-muted-foreground px-1.5">+2nd</Badge>}
+    </span>
+  );
+}
 
 export function PatientsPage({ officeId, search }: { officeId: string; search: PatientsSearch }) {
   const { me } = useMe();
@@ -198,6 +211,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
       case "phone": return <span className="whitespace-nowrap">{p.cellPhone ?? p.homePhone ?? ""}</span>;
       case "email": return <span className="block max-w-56 truncate">{p.email ?? ""}</span>;
       case "city": return [p.city, p.state].filter(Boolean).join(", ");
+      case "coverage": return <CoverageCell coverage={p.coverage} />;
       case "lastVisitDate": return <span className="whitespace-nowrap">{dateLabel(p.lastVisitDate)}</span>;
       case "status": return <Badge variant="outline" className="text-muted-foreground px-1.5">{p.active ? "Active" : "Inactive"}</Badge>;
     }

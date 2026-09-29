@@ -92,6 +92,21 @@ export interface DocsPage {
   pagination: Pagination;
 }
 
+export interface CoveragePlan {
+  carrier: string;
+  planCategory: string | null;
+  planType: string | null;
+  groupNo: string | null;
+  relation: string | null;
+}
+
+export interface Coverage {
+  kind: "insurance" | "self-pay";
+  label: string;
+  primary: CoveragePlan | null;
+  secondary: CoveragePlan | null;
+}
+
 export interface PatientSummary {
   id: string;
   patientId: string;
@@ -107,6 +122,7 @@ export interface PatientSummary {
   active: boolean;
   lastVisitDate: string | null;
   preferredProviderId: string | null;
+  coverage: Coverage;
 }
 
 export type LedgerKind = "procedure" | "payment" | "adjustment" | "note";

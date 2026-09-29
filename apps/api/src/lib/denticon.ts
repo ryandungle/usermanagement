@@ -7,6 +7,7 @@ export const DENTICON = {
   transactions: "denticon-transactions",
   providers: "denticon-providers",
   allocations: "denticon-payment-allocations",
+  insurances: "denticon-patient-insurances",
 } as const;
 
 /**
@@ -39,6 +40,59 @@ export function paymentSource(type: unknown, description: string): PaymentSource
   return "other";
 }
 
+export interface CoveragePlan {
+  carrier: string;
+  planCategory: string | null;
+  planType: string | null;
+  groupNo: string | null;
+  relation: string | null;
+}
+
+/** How a patient pays: insurance (primary + optional secondary) or self-pay. */
+export interface Coverage {
+  kind: "insurance" | "self-pay";
+  label: string;
+  primary: CoveragePlan | null;
+  secondary: CoveragePlan | null;
+}
+
+export const SELF_PAY: Coverage = { kind: "self-pay", label: "Self-pay", primary: null, secondary: null };
+
+/** Build coverage per patient from denticon-patient-insurances rows. */
+export function coverageByPatient(rows: Document[]): Map<string, Coverage> {
+  const plans = new Map<string, { primary?: CoveragePlan; secondary?: CoveragePlan }>();
+  for (const r of rows) {
+    const pid = String(r.patientId ?? "");
+    if (!pid) continue;
+    const carrier = typeof r.carrierName === "string" ? r.carrierName.trim() : "";
+    if (!carrier || /^(cash|self[- ]?pay|none)$/i.test(carrier)) continue; // Denticon models self-pay as a "Cash" carrier
+    const plan: CoveragePlan = {
+      carrier,
+      planCategory: typeof r.planCategory === "string" && r.planCategory ? r.planCategory : null,
+      planType: typeof r.planType === "string" && r.planType ? r.planType : null,
+      groupNo: typeof r.groupNo === "string" && r.groupNo ? r.groupNo : null,
+      relation: typeof r.relationToSubscriber === "string" && r.relationToSubscriber ? r.relationToSubscriber : null,
+    };
+    const e = plans.get(pid) ?? {};
+    if (String(r.insuranceType).toLowerCase() === "secondary") e.secondary ??= plan;
+    else e.primary ??= plan;
+    plans.set(pid, e);
+  }
+  const out = new Map<string, Coverage>();
+  for (const [pid, e] of plans) {
+    const primary = e.primary ?? e.secondary ?? null;
+    const secondary = e.primary ? (e.secondary ?? null) : null;
+    if (!primary) continue;
+    out.set(pid, {
+      kind: "insurance",
+      label: primary.planCategory ? `${primary.carrier} · ${primary.planCategory}` : primary.carrier,
+      primary,
+      secondary,
+    });
+  }
+  return out;
+}
+
 export interface PatientSummary {
   id: string;
   patientId: string;
@@ -54,6 +108,7 @@ export interface PatientSummary {
   active: boolean;
   lastVisitDate: string | null;
   preferredProviderId: string | null;
+  coverage: Coverage;
 }
 
 export const PATIENT_PROJECTION = {
@@ -81,8 +136,12 @@ export function toPatientSummary(d: Document): PatientSummary {
     active: p.active !== false,
     lastVisitDate: s("lastVisitDate"),
     preferredProviderId: s("preferredProviderId"),
+    coverage: SELF_PAY,
   };
 }
+
+const INSURANCE_PROJECTION = { patientId: 1, insuranceType: 1, carrierName: 1, planCategory: 1, planType: 1, groupNo: 1, relationToSubscriber: 1 } as const;
+export { INSURANCE_PROJECTION };
 
 export type PaidStatus = "paid" | "partial" | "unpaid" | "none";
 

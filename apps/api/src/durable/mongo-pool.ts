@@ -6,6 +6,8 @@ import {
   DENTICON,
   PATIENT_PROJECTION,
   applyAllocations,
+  coverageByPatient,
+  INSURANCE_PROJECTION,
   groupVisits,
   procedureMatch,
   providerName,
@@ -206,7 +208,14 @@ export class MongoPool extends DurableObject<PoolEnv> {
           .toArray(),
         coll.countDocuments(filter, { limit: 100_000 }),
       ]);
-      return { patients: docs.map(toPatientSummary), total };
+      const patients = docs.map(toPatientSummary);
+      const ids = patients.map((p) => p.patientId).filter(Boolean);
+      if (ids.length) {
+        const rows = await client.db(database).collection(DENTICON.insurances).find({ patientId: { $in: ids } }, { projection: INSURANCE_PROJECTION }).toArray().catch(() => []);
+        const cov = coverageByPatient(rows);
+        for (const p of patients) p.coverage = cov.get(p.patientId) ?? p.coverage;
+      }
+      return { patients, total };
     });
   }
 
@@ -216,11 +225,14 @@ export class MongoPool extends DurableObject<PoolEnv> {
       const db = client.db(database);
       const patient = await db.collection(DENTICON.patients).findOne({ patientId }, { projection: PATIENT_PROJECTION });
       if (!patient) return null;
-      const [txns, providerDocs, allocationDocs] = await Promise.all([
+      const [txns, providerDocs, allocationDocs, insuranceDocs] = await Promise.all([
         db.collection(DENTICON.transactions).find({ patientId }).sort({ transactionDate: -1, createdOn: -1 }).limit(5000).toArray(),
         db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
         db.collection(DENTICON.allocations).find({ patientId }).limit(10000).toArray().catch(() => [] as Document[]),
+        db.collection(DENTICON.insurances).find({ patientId }, { projection: INSURANCE_PROJECTION }).toArray().catch(() => [] as Document[]),
       ]);
+      const summary = toPatientSummary(patient);
+      summary.coverage = coverageByPatient(insuranceDocs).get(patientId) ?? summary.coverage;
       const providers = Object.fromEntries(providerDocs.map(providerName));
       const lines = txns.map((t) => toLedgerLine(t, providers));
       applyAllocations(lines, allocationDocs.map(toAllocation));
@@ -234,7 +246,7 @@ export class MongoPool extends DurableObject<PoolEnv> {
       const count = (status: string) => treatments.filter((l) => l.payment?.status === status).length;
       return {
         patient: toPlain(patient) as Record<string, unknown>,
-        summary: toPatientSummary(patient),
+        summary,
         totals: {
           charges,
           payments,

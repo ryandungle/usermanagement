@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, CalendarIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
+import { ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -92,6 +92,11 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             <Fact icon={PhoneIcon} label="Home" value={p.homePhone} />
             <Fact icon={MailIcon} label="Email" value={p.email} />
             <Fact icon={MapPinIcon} label="Address" value={address || null} />
+            <Fact
+              icon={ShieldCheckIcon}
+              label="Coverage"
+              value={p.coverage.kind === "self-pay" ? "Self-pay" : [p.coverage.label, p.coverage.primary?.groupNo ? `group ${p.coverage.primary.groupNo}` : null, p.coverage.secondary ? `secondary ${p.coverage.secondary.carrier}` : null].filter(Boolean).join(" · ")}
+            />
             <Fact icon={CalendarIcon} label="First visit" value={dateLabel(typeof patient.firstVisitDate === "string" ? patient.firstVisitDate : null) || null} />
             <Fact icon={CalendarIcon} label="Last visit" value={dateLabel(p.lastVisitDate) || null} />
           </CardContent>
