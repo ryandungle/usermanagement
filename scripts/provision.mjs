@@ -148,6 +148,10 @@ if (!process.env.SKIP_DEPLOY) {
 writeEnvFile(env);
 log("Wrote .env and apps/api/.dev.vars");
 
+// Child processes read these via dotenv, which never overrides variables that
+// already exist in the environment (even empty ones), so set them explicitly.
+for (const [k, v] of Object.entries(env)) process.env[k] = v;
+
 // ---------------------------------------------------------------------------
 // 3. Migrate + seed
 // ---------------------------------------------------------------------------
@@ -156,6 +160,7 @@ run("pnpm db:migrate");
 
 if (!env.ADMIN_PASSWORD) {
   env.ADMIN_PASSWORD = randomBytes(12).toString("base64url");
+  process.env.ADMIN_PASSWORD = env.ADMIN_PASSWORD;
   writeEnvFile(env);
 }
 if (!env.ADMIN_EMAIL) die("ADMIN_EMAIL is required to seed the first app admin");

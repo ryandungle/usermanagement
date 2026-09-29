@@ -77,7 +77,7 @@ export function buildAuth(env: AuthEnv, db: Database = createDb(env.DATABASE_URL
       }),
     ],
     advanced: {
-      database: { generateId: "uuid" },
+      database: { generateId: () => crypto.randomUUID() },
     },
   });
 }
