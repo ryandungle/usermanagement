@@ -203,6 +203,38 @@ export interface PatientDetail {
   transactionCount: number;
 }
 
+export type ProcedureGroupBy = "none" | "patient" | "date" | "both";
+
+export interface ProcedureRow extends LedgerLine {
+  patientId: string;
+  patientName: string;
+}
+
+export interface ProcedureGroup {
+  day: string | null;
+  patientId: string | null;
+  patientName: string | null;
+  procedures: number;
+  patients: number;
+  charges: number;
+  paid: number;
+  adjusted: number;
+  remaining: number;
+  firstDate: string;
+  lastDate: string;
+}
+
+export interface ProcedureFilters {
+  from?: string;
+  to?: string;
+  day?: string;
+  q?: string;
+  providerId?: string;
+  patientId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -311,6 +343,11 @@ export const api = {
     request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
   getPatient: (officeId: string, patientId: string) =>
     request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),
+
+  listProcedures: (officeId: string, params: ProcedureFilters & { groupBy: "none" }) =>
+    request<{ groupBy: "none"; data: ProcedureRow[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`),
+  groupProcedures: (officeId: string, params: ProcedureFilters & { groupBy: Exclude<ProcedureGroupBy, "none"> }) =>
+    request<{ groupBy: ProcedureGroupBy; data: ProcedureGroup[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`),
 
   // users
   listUsers: (params: ListUsersParams) =>

@@ -8,7 +8,7 @@ import { isSafeCollectionName, parseMongoUrl } from "../lib/mongo.js";
 import { officeAsScope, resolveOffice, type ResolvedOffice } from "../lib/scope.js";
 import { getActor, requireRank } from "../middleware/auth.js";
 import type { DocsResult } from "../durable/mongo-pool.js";
-import type { PatientDetail, PatientSummary } from "../lib/denticon.js";
+import type { PatientDetail, PatientSummary, ProcedureGroup, ProcedureRow } from "../lib/denticon.js";
 
 const idParam = z.object({ id: z.uuid() });
 
@@ -30,6 +30,19 @@ const patientsQuery = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const proceduresQuery = z.object({
+  groupBy: z.enum(["none", "patient", "date", "both"]).default("none"),
+  from: day.optional(),
+  to: day.optional(),
+  day: day.optional(),
+  q: z.string().trim().max(200).optional(),
+  providerId: z.string().trim().max(40).optional(),
+  patientId: z.string().regex(/^[\w-]{1,40}$/).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(500).default(25),
 });
 
 const docsQuery = z.object({
@@ -219,6 +232,30 @@ export const connectorRoute = new Hono<AppEnv>()
       const detail = (await pool(c, r.office.officeId).getPatient(row.urlEncrypted, row.database, patientId)) as unknown as PatientDetail | null;
       if (!detail) return c.json({ error: "Patient not found" }, 404);
       return c.json({ data: detail });
+    } catch (err) {
+      return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
+    }
+  })
+
+  // GET /api/offices/:id/procedures?groupBy=none|patient|date|both&from&to&day&q&providerId&patientId&page&pageSize
+  .get("/:id/procedures", async (c) => {
+    const db = createDb(c.env.DATABASE_URL);
+    const r = await loadOfficeForActor(c, db);
+    if ("error" in r) return r.error;
+    const query = proceduresQuery.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: "Invalid query", issues: query.error.issues }, 400);
+    const row = await loadConnector(db, r.office);
+    if (!row) return c.json({ error: "No connector configured" }, 404);
+    const { groupBy, page, pageSize, ...filters } = query.data;
+    const pagination = (total: number) => ({ page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+    try {
+      const p = pool(c, r.office.officeId);
+      if (groupBy === "none") {
+        const result = (await p.listProcedures(row.urlEncrypted, row.database, filters, page, pageSize)) as unknown as { rows: ProcedureRow[]; total: number; providers: Record<string, string> };
+        return c.json({ groupBy, data: result.rows, providers: result.providers, pagination: pagination(result.total) });
+      }
+      const result = (await p.groupProcedures(row.urlEncrypted, row.database, groupBy, filters, page, pageSize)) as unknown as { groups: ProcedureGroup[]; total: number; providers: Record<string, string> };
+      return c.json({ groupBy, data: result.groups, providers: result.providers, pagination: pagination(result.total) });
     } catch (err) {
       return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
     }

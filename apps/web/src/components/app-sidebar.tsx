@@ -5,6 +5,7 @@ import {
   Building2Icon,
   CircleHelpIcon,
   HeartPulseIcon,
+  StethoscopeIcon,
   LayoutDashboardIcon,
   MapPinIcon,
   PlusCircleIcon,
@@ -164,6 +165,14 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                       <HeartPulseIcon />
                       <span>Patients</span>
                       {connected.length > 1 && <span className="text-muted-foreground ml-auto truncate text-xs">{patientsOffice.name}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Procedures" isActive={pathname.includes("/procedures")}>
+                    <Link to="/offices/$officeId/procedures" params={{ officeId: patientsOffice.id }} search={{}}>
+                      <StethoscopeIcon />
+                      <span>Procedures</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

@@ -337,3 +337,59 @@ export function providerName(d: Document): [string, string] {
   const parts = [p.title, p.firstName, p.lastName].filter((x): x is string => typeof x === "string" && x.trim() !== "");
   return [String(p.providerId ?? ""), parts.join(" ") || String(p.providerShortId ?? p.providerId ?? "")];
 }
+
+// ---------------------------------------------------------------------------
+// Office-wide procedures
+// ---------------------------------------------------------------------------
+
+export type ProcedureGroupBy = "none" | "patient" | "date" | "both";
+
+export interface ProcedureFilters {
+  from?: string; // YYYY-MM-DD on transactionDate
+  to?: string;
+  /** Matches procedureCode or description. */
+  q?: string;
+  providerId?: string;
+  patientId?: string;
+  /** Exact day (YYYY-MM-DD); used when expanding a date group. */
+  day?: string;
+}
+
+export interface ProcedureRow extends LedgerLine {
+  patientId: string;
+  patientName: string;
+}
+
+export interface ProcedureGroup {
+  day: string | null;
+  patientId: string | null;
+  patientName: string | null;
+  procedures: number;
+  patients: number;
+  charges: number;
+  paid: number;
+  adjusted: number;
+  remaining: number;
+  firstDate: string;
+  lastDate: string;
+}
+
+export function procedureMatch(f: ProcedureFilters): Document {
+  const m: Document = { ledgerType: "C" };
+  const range: Document = {};
+  if (f.day) {
+    range.$gte = new Date(`${f.day}T00:00:00.000Z`);
+    range.$lte = new Date(`${f.day}T23:59:59.999Z`);
+  } else {
+    if (f.from) range.$gte = new Date(`${f.from}T00:00:00.000Z`);
+    if (f.to) range.$lte = new Date(`${f.to}T23:59:59.999Z`);
+  }
+  if (Object.keys(range).length) m.transactionDate = range;
+  if (f.providerId) m.providerId = f.providerId;
+  if (f.patientId) m.patientId = f.patientId;
+  if (f.q) {
+    const rx = { $regex: f.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+    m.$or = [{ procedureCode: rx }, { description: rx }];
+  }
+  return m;
+}

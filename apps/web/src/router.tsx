@@ -7,6 +7,7 @@ import { SettingsPage } from "./routes/Settings";
 import { OfficeDetailPage } from "./routes/OfficeDetail";
 import { PatientsPage, type PatientsSearch } from "./routes/Patients";
 import { PatientDetailPage } from "./routes/PatientDetail";
+import { ProceduresPage, type ProceduresSearch } from "./routes/Procedures";
 import { DashboardPage, type DashboardSearch, type Tab } from "./routes/Dashboard";
 
 async function currentUser() {
@@ -98,6 +99,25 @@ const patientRoute = createRoute({
   },
 });
 
+const proceduresRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/offices/$officeId/procedures",
+  validateSearch: (s: Record<string, unknown>): ProceduresSearch => ({
+    groupBy: ["none", "patient", "date", "both"].includes(s.groupBy as string) ? (s.groupBy as ProceduresSearch["groupBy"]) : undefined,
+    from: typeof s.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.from) ? s.from : undefined,
+    to: typeof s.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.to) ? s.to : undefined,
+    q: typeof s.q === "string" && s.q ? s.q : undefined,
+    providerId: typeof s.providerId === "string" && s.providerId ? s.providerId : undefined,
+    page: typeof s.page === "number" && s.page > 1 ? s.page : undefined,
+  }),
+  beforeLoad: managerGuard,
+  component: function ProceduresRoute() {
+    const { officeId } = proceduresRoute.useParams();
+    const search = proceduresRoute.useSearch();
+    return <ProceduresPage officeId={officeId} search={search} />;
+  },
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -107,7 +127,7 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, officeRoute, patientsRoute, patientRoute, settingsRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, officeRoute, patientsRoute, patientRoute, proceduresRoute, settingsRoute, loginRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

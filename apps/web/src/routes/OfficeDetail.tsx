@@ -128,9 +128,14 @@ export function OfficeDetailPage({ officeId }: { officeId: string }) {
               <CardDescription>Search patients and open a chart of procedures by date of service with payments.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild size="sm">
-                <Link to="/offices/$officeId/patients" params={{ officeId }} search={{}}>Open patients</Link>
-              </Button>
+              <div className="flex gap-2">
+                <Button asChild size="sm">
+                  <Link to="/offices/$officeId/patients" params={{ officeId }} search={{}}>Open patients</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/offices/$officeId/procedures" params={{ officeId }} search={{}}>Procedures</Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}
