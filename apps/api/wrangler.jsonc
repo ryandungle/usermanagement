@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "usermanagement",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "minify": true,
+
+  // The built React app is served as static assets from the same Worker,
+  // so the API and the UI share one origin (cookies just work, no CORS in prod).
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Non-secret config. Secrets (DATABASE_URL, BETTER_AUTH_SECRET) go in
+  // `.dev.vars` locally and `wrangler secret put <NAME>` in production.
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:8787",
+    "TRUSTED_ORIGINS": "http://localhost:5173"
+  }
+}

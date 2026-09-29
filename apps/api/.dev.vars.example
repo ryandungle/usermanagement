@@ -1,0 +1,6 @@
+# Copy to apps/api/.dev.vars for `wrangler dev`. Never commit .dev.vars.
+DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require"
+BETTER_AUTH_SECRET="replace-with-output-of: openssl rand -base64 32"
+# Optional overrides (defaults come from wrangler.jsonc vars)
+# BETTER_AUTH_URL="http://localhost:8787"
+# TRUSTED_ORIGINS="http://localhost:5173"
