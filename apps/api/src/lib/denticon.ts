@@ -247,6 +247,8 @@ export interface PatientDetail {
   notes: string[];
   /** Balance as the practice system itself reports it, when the export carries one. */
   pmsBalance?: number | null;
+  /** Collection the allocation popovers are built from. */
+  allocationSource?: string;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;

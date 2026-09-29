@@ -281,21 +281,43 @@ export const opendentalAdapter: PmsAdapter = {
       const c = cpByNum.get(String(cp.ClaimPaymentNum));
       return c ? `Insurance payment · ${c.CarrierName ?? "carrier"}${c.CheckNum ? ` · check ${c.CheckNum}` : ""}` : `Insurance payment · claim ${cp.ClaimNum}`;
     };
-    const insGroups = new Map<string, { date: string; amount: number; desc: string; providerId: string | null; count: number }>();
+    const procByNum = new Map(lines.map((l) => [l.ledgerId ?? "", l]));
+    const insGroups = new Map<string, { date: string; amount: number; desc: string; providerId: string | null; items: AllocationLink[] }>();
     for (const cp of paidCps) {
       const k = String(cp.ClaimPaymentNum) !== "0" ? `claimpayment:${cp.ClaimPaymentNum}` : `claim:${cp.ClaimNum}:${day(cp.DateCP)}`;
-      const g = insGroups.get(k) ?? { date: iso(cp.DateCP) ?? iso(cp.ProcDate) ?? new Date(0).toISOString(), amount: 0, desc: payDesc(cp), providerId: str(cp.ProvNum), count: 0 };
-      g.amount += num(cp.InsPayAmt);
-      g.count += 1;
+      const g = insGroups.get(k) ?? { date: iso(cp.DateCP) ?? iso(cp.ProcDate) ?? new Date(0).toISOString(), amount: 0, desc: payDesc(cp), providerId: str(cp.ProvNum), items: [] };
+      const paidAmt = num(cp.InsPayAmt);
+      g.amount += paidAmt;
+      if (paidAmt !== 0) {
+        // Link the claim proc to the procedure it paid, so the UI can list which charges this check settled.
+        const proc = procByNum.get(String(cp.ProcNum));
+        g.items.push({
+          id: String(cp._id),
+          paymentAllocationId: str(cp.ClaimProcNum),
+          paymentLedgerId: k,
+          procedureLedgerId: str(cp.ProcNum),
+          amount: paidAmt,
+          ledgerType: "P",
+          claimId: str(cp.ClaimNum),
+          date: iso(cp.DateCP) ?? g.date,
+          linkedLedgerId: str(cp.ProcNum),
+          linkedDescription: proc?.description ?? (cp.ProcNum ? `Procedure ${cp.ProcNum}` : "Claim-level payment (no procedure)"),
+          linkedCode: proc?.code ?? null,
+          linkedDate: proc?.date ?? iso(cp.ProcDate) ?? g.date,
+          linkedKind: proc ? "procedure" : null,
+          linkedSource: null,
+        });
+      }
       insGroups.set(k, g);
     }
     for (const [k, g] of insGroups) {
       if (g.amount === 0) continue;
+      const procedures = new Set(g.items.map((i) => i.procedureLedgerId).filter(Boolean)).size;
       lines.push({
         id: k, ledgerId: k, kind: "payment", date: g.date, dateOfService: g.date.slice(0, 10), code: null, description: g.desc, amount: -round2(g.amount), fee: null,
         tooth: null, surface: null, providerId: g.providerId, provider: g.providerId ? providers[g.providerId] ?? g.providerId : null, ledgerType: "I", ledgerType2: null,
         claimId: null, treatPlanId: null, estimatedInsurance: null, estimatedPatient: null, source: "insurance",
-        applied: { total: round2(g.amount), unallocated: 0, procedures: g.count, items: [] },
+        applied: { total: round2(g.amount), unallocated: 0, procedures, items: g.items },
       });
     }
     // Write-offs as adjustment lines (one per claim payment group).
@@ -352,6 +374,7 @@ export const opendentalAdapter: PmsAdapter = {
       notes: [
         "Open Dental export: paid status reflects insurance payments and write-offs per procedure. Patient payments are recorded at account level (no paysplit rows), so they count toward the balance but are not tied to individual procedures.",
       ],
+      allocationSource: m.claimProcs ?? undefined,
       pmsBalance: typeof patient.BalTotal === "number" ? patient.BalTotal : num(patient.BalTotal) || null,
     };
   },

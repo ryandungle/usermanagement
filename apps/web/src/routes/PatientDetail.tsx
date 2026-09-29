@@ -173,6 +173,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
                   lines={filteredTreatments}
                   columns={["date", "code", "description", "tooth", "provider", "amount", "paid", "remaining", "status"]}
                   emptyText="No treatments match."
+                  source={detail.allocationSource}
                 />
               </CardContent>
             </Card>
@@ -180,7 +181,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
 
           <TabsContent value="visits" className="flex flex-col gap-4">
             {visits.length === 0 && <p className="text-muted-foreground text-sm">No transactions on file for this patient.</p>}
-            {visits.map((v) => <VisitCard key={v.dateOfService} visit={v} />)}
+            {visits.map((v) => <VisitCard key={v.dateOfService} visit={v} source={detail.allocationSource} />)}
           </TabsContent>
 
           <TabsContent value="payments">
@@ -190,7 +191,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
                 <CardDescription>Every payment on the ledger, newest first.</CardDescription>
               </CardHeader>
               <CardContent>
-                <LedgerTable lines={payments} columns={["date", "description", "source", "provider", "amount", "applied"]} emptyText="No payments recorded." />
+                <LedgerTable lines={payments} columns={["date", "description", "source", "provider", "amount", "applied"]} emptyText="No payments recorded." source={detail.allocationSource} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -225,7 +226,7 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub: 
   );
 }
 
-function VisitCard({ visit }: { visit: Visit }) {
+function VisitCard({ visit, source }: { visit: Visit; source?: string }) {
   const hasProcedures = visit.procedures.length > 0;
   return (
     <Card>
@@ -244,7 +245,7 @@ function VisitCard({ visit }: { visit: Visit }) {
       </CardHeader>
       <CardContent className="grid gap-4">
         {hasProcedures && (
-          <LedgerTable lines={visit.procedures} columns={["code", "description", "tooth", "surface", "provider", "amount", "paid", "status"]} footer={{ label: "Charges", value: visit.charges }} />
+          <LedgerTable lines={visit.procedures} columns={["code", "description", "tooth", "surface", "provider", "amount", "paid", "status"]} footer={{ label: "Charges", value: visit.charges }} source={source} />
         )}
         {visit.payments.length > 0 && (
           <Section title="Payments">
@@ -271,8 +272,9 @@ function VisitCard({ visit }: { visit: Visit }) {
  * `side` says what the linked line is: the charge a payment settled, or the
  * payment/adjustment that settled a charge.
  */
-function AllocationPopover({ title, description, items, side, children }: {
+function AllocationPopover({ title, description, items, side, source, children }: {
   title: string;
+  source?: string;
   description: string;
   items: AllocationLink[];
   side: "procedure" | "payment";
@@ -316,7 +318,7 @@ function AllocationPopover({ title, description, items, side, children }: {
           </TableBody>
         </Table>
         <div className="text-muted-foreground border-t px-4 py-2 text-[11px]">
-          Source: denticon-payment-allocations · {items.length} row{items.length === 1 ? "" : "s"} · ids {items.map((a) => a.paymentAllocationId ?? a.id).join(", ").slice(0, 80)}
+          {source ? `Source: ${source} · ` : ""}{items.length} row{items.length === 1 ? "" : "s"} · ids {items.map((a) => a.paymentAllocationId ?? a.id).join(", ").slice(0, 80)}
         </div>
       </PopoverContent>
     </Popover>
@@ -349,7 +351,7 @@ export function PaidBadge({ status }: { status: PaidStatus | undefined }) {
   }
 }
 
-function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[]; columns: Col[]; footer?: { label: string; value: number }; emptyText?: string }) {
+function LedgerTable({ lines, columns, footer, emptyText, source }: { lines: LedgerLine[]; columns: Col[]; footer?: { label: string; value: number }; emptyText?: string; source?: string }) {
   const cell = (l: LedgerLine, c: Col): React.ReactNode => {
     switch (c) {
       case "paid": {
@@ -362,6 +364,7 @@ function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[
             description={`${money(p.paid)} paid${p.adjusted ? ` and ${money(p.adjusted)} written off` : ""} against this ${money(l.amount)} charge.`}
             items={p.allocations}
             side="payment"
+            source={source}
           >
             {money(p.paid + p.adjusted)}
           </AllocationPopover>
@@ -383,6 +386,7 @@ function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[
             description={`${money(a.total)} of this ${money(Math.abs(l.amount))} ${l.kind} was allocated to the charges below.${a.unallocated ? ` ${money(a.unallocated)} is not applied to anything yet.` : ""}`}
             items={a.items}
             side="procedure"
+            source={source}
           >
             {label}
           </AllocationPopover>

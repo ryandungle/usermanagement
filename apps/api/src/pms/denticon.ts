@@ -120,6 +120,7 @@ export const denticonAdapter: PmsAdapter = {
       providers,
       transactionCount: lines.length,
       notes: [],
+      allocationSource: m.allocations ?? undefined,
     };
   },
 
