@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, BuildingIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, LoaderIcon, SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import { SiteHeader } from "@/components/site-header";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { ColumnPicker } from "@/components/office/column-picker";
 import { rememberOffice, rememberState, rememberedState } from "@/lib/remembered";
-import { api, ApiError, type GroupSort, type Office, type Pagination, type ProcedureGroup, type ProcedureGroupBy, type ProcedureRow, type ProcedureSort } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { api, errorMessage, type GroupSort, type Office, type ProcedureGroup, type ProcedureGroupBy, type ProcedureRow, type ProcedureSort } from "@/lib/api";
 import { dateLabel, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
 import { PaidBadge } from "./PatientDetail";
@@ -104,14 +105,6 @@ function SortHead({ label, field, sort, order, onSort, right }: { label: string;
 export function ProceduresPage({ officeId, search }: { officeId: string; search: ProceduresSearch }) {
   const { me } = useMe();
   const navigate = useNavigate();
-  const [office, setOffice] = useState<Office | null>(null);
-  const [offices, setOffices] = useState<Office[]>([]);
-  const [rows, setRows] = useState<ProcedureRow[]>([]);
-  const [groups, setGroups] = useState<ProcedureGroup[]>([]);
-  const [providers, setProviders] = useState<Record<string, string>>({});
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const groupBy = search.groupBy ?? "date";
   const { from, to, q = "", providerId = "" } = search;
@@ -136,55 +129,36 @@ export function ProceduresPage({ officeId, search }: { officeId: string; search:
   }, [officeId, bare, search]);
 
   useEffect(() => {
-    api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
-    api.listOffices({}).then((r) => setOffices(r.data.filter((o) => o.hasConnector))).catch(() => setOffices([]));
     rememberOffice("procedures", officeId);
   }, [officeId]);
 
-  // Only the latest request may update the table: a slow query for the previous office or filter must not overwrite a newer one.
-  const requestSeq = useRef(0);
-  const load = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    const current = () => seq === requestSeq.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const base = { from, to, q: q || undefined, providerId: providerId || undefined, nonZero: nonZero ? ("true" as const) : undefined, sort, order, page, pageSize: PAGE_SIZE };
+  const officeQuery = useQuery({ queryKey: ["office", officeId], queryFn: ({ signal }) => api.getOffice(officeId, signal) });
+  const office = officeQuery.data?.data ?? null;
+  const officesQuery = useQuery({ queryKey: ["offices", "connected"], queryFn: ({ signal }) => api.listOffices({}, signal), select: (r) => r.data.filter((o) => o.hasConnector) });
+  const offices = officesQuery.data ?? [];
+
+  // Keyed by office + filters + grouping: a key change aborts the in-flight request for the old key, and rows
+  // are kept as a placeholder only while the office stays the same.
+  const base = { from, to, q: q || undefined, providerId: providerId || undefined, nonZero: nonZero ? ("true" as const) : undefined, sort, order, page, pageSize: PAGE_SIZE };
+  const list = useQuery({
+    queryKey: ["procedures", officeId, groupBy, base],
+    queryFn: async ({ signal }) => {
       if (groupBy === "none") {
-        const res = await api.listProcedures(officeId, { ...base, groupBy });
-        if (!current()) return;
-        setRows(res.data);
-        setGroups([]);
-        setProviders(res.providers);
-        setPagination(res.pagination);
-      } else {
-        const res = await api.groupProcedures(officeId, { ...base, groupBy });
-        if (!current()) return;
-        setGroups(res.data);
-        setRows([]);
-        setProviders(res.providers);
-        setPagination(res.pagination);
+        const res = await api.listProcedures(officeId, { ...base, groupBy }, signal);
+        return { rows: res.data, groups: [] as ProcedureGroup[], providers: res.providers, pagination: res.pagination };
       }
-    } catch (err) {
-      if (!current()) return;
-      setError(err instanceof ApiError ? err.message : "Could not load procedures");
-      setRows([]);
-      setGroups([]);
-    } finally {
-      if (current()) setLoading(false);
-    }
-  }, [officeId, groupBy, from, to, q, providerId, nonZero, sort, order, page]);
-
-  useEffect(() => {
-    if (!needsRestore) void load();
-  }, [load, needsRestore]);
-
-  // Clear the previous office's rows the moment the office changes.
-  useEffect(() => {
-    setRows([]);
-    setGroups([]);
-    setPagination(null);
-  }, [officeId]);
+      const res = await api.groupProcedures(officeId, { ...base, groupBy }, signal);
+      return { rows: [] as ProcedureRow[], groups: res.data, providers: res.providers, pagination: res.pagination };
+    },
+    enabled: !needsRestore,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === officeId ? prev : undefined),
+  });
+  const rows = list.data?.rows ?? [];
+  const groups = list.data?.groups ?? [];
+  const providers = list.data?.providers ?? {};
+  const pagination = list.data?.pagination ?? null;
+  const loading = list.isPending || list.isPlaceholderData;
+  const error = list.error ? errorMessage(list.error, "Could not load procedures") : null;
 
   const go = (next: Partial<ProceduresSearch>) =>
     navigate({

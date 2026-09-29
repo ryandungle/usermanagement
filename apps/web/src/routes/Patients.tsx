@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { BuildingIcon } from "lucide-react";
 import { ArrowDownIcon, ArrowUpIcon, ArrowUpDownIcon, ChevronLeftIcon, ChevronRightIcon, LoaderIcon, SearchIcon, XIcon } from "lucide-react";
@@ -11,7 +11,8 @@ import { SiteHeader } from "@/components/site-header";
 import { ColumnPicker } from "@/components/office/column-picker";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { rememberOffice, rememberState, rememberedState } from "@/lib/remembered";
-import { api, ApiError, type Office, type Pagination, type PatientSort, type PatientSummary } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { api, errorMessage, type Office, type PatientSort, type PatientSummary } from "@/lib/api";
 import { ageFrom, dateLabel, fullName } from "@/lib/format";
 import { useMe } from "@/lib/me";
 
@@ -70,13 +71,6 @@ export function CoverageCell({ coverage }: { coverage: PatientSummary["coverage"
 export function PatientsPage({ officeId, search }: { officeId: string; search: PatientsSearch }) {
   const { me } = useMe();
   const navigate = useNavigate();
-  const [office, setOffice] = useState<Office | null>(null);
-  const [offices, setOffices] = useState<Office[]>([]);
-  const [lastVisitSupported, setLastVisitSupported] = useState(true);
-  const [rows, setRows] = useState<PatientSummary[]>([]);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<ColKey[]>(ALL_KEYS);
 
   const q = search.q ?? "";
@@ -127,45 +121,30 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   }
 
   useEffect(() => {
-    api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
-    api.getConnector(officeId).then((r) => setLastVisitSupported(r.data?.capabilities.lastVisit ?? true)).catch(() => {});
     rememberOffice("patients", officeId);
   }, [officeId]);
 
+  const officeQuery = useQuery({ queryKey: ["office", officeId], queryFn: ({ signal }) => api.getOffice(officeId, signal) });
+  const office = officeQuery.data?.data ?? null;
   // Offices in the viewer's scope that have a database connector.
-  useEffect(() => {
-    api.listOffices({}).then((r) => setOffices(r.data.filter((o) => o.hasConnector))).catch(() => setOffices([]));
-  }, []);
+  const officesQuery = useQuery({ queryKey: ["offices", "connected"], queryFn: ({ signal }) => api.listOffices({}, signal), select: (r) => r.data.filter((o) => o.hasConnector) });
+  const offices = officesQuery.data ?? [];
+  const connectorQuery = useQuery({ queryKey: ["connector", officeId], queryFn: ({ signal }) => api.getConnector(officeId, signal) });
+  const lastVisitSupported = connectorQuery.data?.data?.capabilities.lastVisit ?? true;
 
-  // Only the latest request may update the table (a slow query for another office must not overwrite a newer one).
-  const requestSeq = useRef(0);
-  const load = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    const current = () => seq === requestSeq.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.listPatients(officeId, { q: q || undefined, active, page, pageSize: PAGE_SIZE, sort, order, dateField: from || to ? dateField : undefined, from, to });
-      if (!current()) return;
-      setRows(res.data);
-      setPagination(res.pagination);
-    } catch (err) {
-      if (!current()) return;
-      setError(err instanceof ApiError ? err.message : "Could not load patients");
-      setRows([]);
-    } finally {
-      if (current()) setLoading(false);
-    }
-  }, [officeId, q, active, page, sort, order, dateField, from, to]);
-
-  useEffect(() => {
-    if (!needsRestore) void load();
-  }, [load, needsRestore]);
-
-  useEffect(() => {
-    setRows([]);
-    setPagination(null);
-  }, [officeId]);
+  // The list itself: keyed by office + filters. Changing the key aborts the previous request; rows from the
+  // same office stay on screen while the next page loads, rows from another office never do.
+  const params = { q: q || undefined, active, page, pageSize: PAGE_SIZE, sort, order, dateField: from || to ? dateField : undefined, from, to };
+  const list = useQuery({
+    queryKey: ["patients", officeId, params],
+    queryFn: ({ signal }) => api.listPatients(officeId, params, signal),
+    enabled: !needsRestore,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === officeId ? prev : undefined),
+  });
+  const rows = list.data?.data ?? [];
+  const pagination = list.data?.pagination ?? null;
+  const loading = list.isPending || list.isPlaceholderData;
+  const error = list.error ? errorMessage(list.error, "Could not load patients") : null;
 
   const go = (next: Partial<PatientsSearch>) =>
     navigate({

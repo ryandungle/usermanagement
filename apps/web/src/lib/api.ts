@@ -370,6 +370,11 @@ export class ApiError extends Error {
   }
 }
 
+/** Message to show for a failed request. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -437,15 +442,15 @@ export const api = {
   renameCompany: (id: string, name: string) => request<{ data: Company }>(`/api/companies/${id}`, json("PATCH", { name })),
   deleteCompany: (id: string) => request<{ data: { success: boolean } }>(`/api/companies/${id}`, json("DELETE")),
 
-  listOffices: (params: { companyId?: string; clientId?: string }) => request<{ data: Office[] }>(`/api/offices${qs(params)}`),
-  getOffice: (id: string) => request<{ data: Office }>(`/api/offices/${id}`),
+  listOffices: (params: { companyId?: string; clientId?: string }, signal?: AbortSignal) => request<{ data: Office[] }>(`/api/offices${qs(params)}`, { signal }),
+  getOffice: (id: string, signal?: AbortSignal) => request<{ data: Office }>(`/api/offices/${id}`, { signal }),
   createOffice: (companyId: string, name: string) =>
     request<{ data: Office }>("/api/offices", json("POST", { companyId, name })),
   renameOffice: (id: string, name: string) => request<{ data: Office }>(`/api/offices/${id}`, json("PATCH", { name })),
   deleteOffice: (id: string) => request<{ data: { success: boolean } }>(`/api/offices/${id}`, json("DELETE")),
 
   // office connector + data browsing
-  getConnector: (officeId: string) => request<{ data: OfficeConnector | null }>(`/api/offices/${officeId}/connector`),
+  getConnector: (officeId: string, signal?: AbortSignal) => request<{ data: OfficeConnector | null }>(`/api/offices/${officeId}/connector`, { signal }),
   saveConnector: (officeId: string, data: { type: "mongodb"; url: string; database?: string; pmsType?: PmsType; mapping?: PmsMapping }) =>
     request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector`, json("PUT", data)),
   saveConnectorSettings: (officeId: string, data: { pmsType: PmsType; mapping?: PmsMapping }) =>
@@ -460,17 +465,18 @@ export const api = {
   listPatients: (
     officeId: string,
     params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number; sort?: PatientSort; order?: "asc" | "desc"; dateField?: "lastVisitDate" | "birthDate"; from?: string; to?: string },
+    signal?: AbortSignal,
   ) =>
-    request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
-  getPatient: (officeId: string, patientId: string) =>
-    request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),
-  getFamily: (officeId: string, patientId: string) =>
-    request<{ data: FamilySummary }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}/family`),
+    request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`, { signal }),
+  getPatient: (officeId: string, patientId: string, signal?: AbortSignal) =>
+    request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`, { signal }),
+  getFamily: (officeId: string, patientId: string, signal?: AbortSignal) =>
+    request<{ data: FamilySummary }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}/family`, { signal }),
 
-  listProcedures: (officeId: string, params: ProcedureFilters & { groupBy: "none" }) =>
-    request<{ groupBy: "none"; data: ProcedureRow[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`),
-  groupProcedures: (officeId: string, params: ProcedureFilters & { groupBy: Exclude<ProcedureGroupBy, "none"> }) =>
-    request<{ groupBy: ProcedureGroupBy; data: ProcedureGroup[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`),
+  listProcedures: (officeId: string, params: ProcedureFilters & { groupBy: "none" }, signal?: AbortSignal) =>
+    request<{ groupBy: "none"; data: ProcedureRow[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`, { signal }),
+  groupProcedures: (officeId: string, params: ProcedureFilters & { groupBy: Exclude<ProcedureGroupBy, "none"> }, signal?: AbortSignal) =>
+    request<{ groupBy: ProcedureGroupBy; data: ProcedureGroup[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`, { signal }),
 
   // users
   listUsers: (params: ListUsersParams) =>

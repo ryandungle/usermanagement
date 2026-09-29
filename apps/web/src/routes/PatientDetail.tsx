@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { PMS_LABEL } from "@usermanagement/shared";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon, UsersIcon, ChevronRightIcon, FileTextIcon } from "lucide-react";
@@ -10,50 +10,27 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteHeader } from "@/components/site-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { api, ApiError, type AllocationLink, type Claim, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { api, errorMessage, type AllocationLink, type Claim, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
 import { rememberedPatientsSearch } from "./Patients";
 
 export function PatientDetailPage({ officeId, patientId }: { officeId: string; patientId: string }) {
   const { me } = useMe();
-  const [detail, setDetail] = useState<PatientDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | PaidStatus>("all");
-  const [family, setFamily] = useState<FamilySummary | null>(null);
-  const [familyError, setFamilyError] = useState<string | null>(null);
+  const detailQuery = useQuery({ queryKey: ["patient", officeId, patientId], queryFn: ({ signal }) => api.getPatient(officeId, patientId, signal) });
+  const detail: PatientDetail | null = detailQuery.data?.data ?? null;
+  const error = detailQuery.error ? errorMessage(detailQuery.error, "Could not load patient") : null;
   const filteredTreatments = useMemo(
     () => (detail ? detail.treatments.filter((t) => statusFilter === "all" || t.payment?.status === statusFilter) : []),
     [detail, statusFilter],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    setDetail(null);
-    setError(null);
-    api
-      .getPatient(officeId, patientId)
-      .then((r) => { if (!cancelled) setDetail(r.data); })
-      .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Could not load patient"); });
-    return () => {
-      cancelled = true;
-    };
-  }, [officeId, patientId]);
-
   const familyAvailable = detail?.familyAvailable ?? false;
-  useEffect(() => {
-    let cancelled = false;
-    setFamily(null);
-    setFamilyError(null);
-    if (!familyAvailable) return;
-    api
-      .getFamily(officeId, patientId)
-      .then((r) => { if (!cancelled) setFamily(r.data); })
-      .catch((err) => { if (!cancelled) setFamilyError(err instanceof ApiError ? err.message : "Could not load family"); });
-    return () => {
-      cancelled = true;
-    };
-  }, [officeId, patientId, familyAvailable]);
+  const familyQuery = useQuery({ queryKey: ["family", officeId, patientId], queryFn: ({ signal }) => api.getFamily(officeId, patientId, signal), enabled: familyAvailable });
+  const family: FamilySummary | null = familyQuery.data?.data ?? null;
+  const familyError = familyQuery.error ? errorMessage(familyQuery.error, "Could not load family") : null;
 
   if (!me) return null;
 
