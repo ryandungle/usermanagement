@@ -204,6 +204,47 @@ export interface Visit {
   adjusted: number;
 }
 
+export type ClaimStatusKey = "unsent" | "sent" | "received" | "closed" | "denied" | "other";
+
+export interface ClaimProcedureLine {
+  procedureLedgerId: string | null;
+  code: string | null;
+  description: string;
+  date: string | null;
+  feeBilled: number;
+  estimate: number | null;
+  insurancePaid: number;
+  writeOff: number;
+}
+
+export interface ClaimPaymentLine {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  checkNum: string | null;
+}
+
+export interface Claim {
+  claimId: string;
+  type: string;
+  status: ClaimStatusKey;
+  statusLabel: string;
+  carrier: string | null;
+  provider: string | null;
+  dateOfService: string | null;
+  dateSent: string | null;
+  dateReceived: string | null;
+  billed: number;
+  estimate: number;
+  insurancePaid: number;
+  writeOff: number;
+  deductible: number;
+  daysOutstanding: number | null;
+  procedures: ClaimProcedureLine[];
+  payments: ClaimPaymentLine[];
+}
+
 export interface PatientDetail {
   patient: Record<string, unknown>;
   summary: PatientSummary;
@@ -226,6 +267,7 @@ export interface PatientDetail {
   treatments: LedgerLine[];
   visits: Visit[];
   payments: LedgerLine[];
+  claims: Claim[];
   providers: Record<string, string>;
   transactionCount: number;
   notes: string[];

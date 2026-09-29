@@ -246,6 +246,7 @@ export interface PatientDetail {
   treatments: LedgerLine[];
   visits: Visit[];
   payments: LedgerLine[];
+  claims: Claim[];
   providers: Record<string, string>;
   transactionCount: number;
   /** Adapter caveats worth showing on the chart (e.g. what the export cannot tell us). */
@@ -286,7 +287,7 @@ export function toLedgerLine(d: Document, providers: Record<string, string>): Le
     treatPlanId: s("treatPlanId"),
     estimatedInsurance: typeof t.estimatedInsurance === "number" ? t.estimatedInsurance : null,
     estimatedPatient: typeof t.estimatedPatient === "number" ? t.estimatedPatient : null,
-    source: kind === "payment" ? paymentSource(t.ledgerType, description) : undefined,
+    source: kind === "payment" ? paymentSource(t.ledgerType, description) : kind === "adjustment" && s("claimId") ? "insurance" : undefined,
   };
 }
 
@@ -376,6 +377,8 @@ export function applyAllocations(lines: LedgerLine[], allocations: Allocation[])
 export function groupVisits(lines: LedgerLine[]): Visit[] {
   const byDate = new Map<string, Visit>();
   for (const line of lines) {
+    // Insurance money is tracked per claim, not per visit.
+    if (line.source === "insurance") continue;
     let v = byDate.get(line.dateOfService);
     if (!v) {
       v = { dateOfService: line.dateOfService, providers: [], procedures: [], payments: [], adjustments: [], notes: [], charges: 0, paid: 0, adjusted: 0 };
@@ -429,6 +432,49 @@ export interface ProcedureFilters {
 
 export const PROCEDURE_SORTS = ["date", "patient", "code", "description", "provider", "amount"] as const;
 export const GROUP_SORTS = ["day", "patient", "procedures", "patients", "charges"] as const;
+
+export type ClaimStatusKey = "unsent" | "sent" | "received" | "closed" | "denied" | "other";
+
+export interface ClaimProcedureLine {
+  procedureLedgerId: string | null;
+  code: string | null;
+  description: string;
+  date: string | null;
+  feeBilled: number;
+  estimate: number | null;
+  insurancePaid: number;
+  writeOff: number;
+}
+
+export interface ClaimPaymentLine {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  checkNum: string | null;
+}
+
+/** An insurance claim: what went out and what came back. */
+export interface Claim {
+  claimId: string;
+  type: string;
+  status: ClaimStatusKey;
+  statusLabel: string;
+  carrier: string | null;
+  provider: string | null;
+  dateOfService: string | null;
+  dateSent: string | null;
+  dateReceived: string | null;
+  billed: number;
+  estimate: number;
+  insurancePaid: number;
+  writeOff: number;
+  deductible: number;
+  /** Days since sent with nothing received, for claims still out. */
+  daysOutstanding: number | null;
+  procedures: ClaimProcedureLine[];
+  payments: ClaimPaymentLine[];
+}
 
 /** One member of a family account (Open Dental: everyone under the same guarantor). */
 export interface FamilyMember {

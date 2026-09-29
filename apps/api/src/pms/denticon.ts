@@ -12,6 +12,9 @@ import {
   toAllocation,
   toLedgerLine,
   toPatientSummary,
+  type Claim,
+  type ClaimStatusKey,
+  type LedgerLine,
   type PatientDetail,
   type PatientSummary,
   type ProcedureFilters,
@@ -20,7 +23,7 @@ import {
   type ProcedureRow,
 } from "../lib/denticon.js";
 import { toPlain } from "../lib/mongo.js";
-import { escapeRegex, round2, type PatientListQuery, type PmsAdapter, type ProcedureGroupResult, type ProcedureListResult, type SortSpec } from "./types.js";
+import { daysSince, escapeRegex, round2, type PatientListQuery, type PmsAdapter, type ProcedureGroupResult, type ProcedureListResult, type SortSpec } from "./types.js";
 
 async function providersMap(db: Db, m: PmsMapping): Promise<Record<string, string>> {
   const docs = await db.collection(m.providers!).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray().catch(() => []);
@@ -31,6 +34,72 @@ async function patientNames(db: Db, m: PmsMapping, ids: string[]): Promise<Map<s
   if (ids.length === 0) return new Map();
   const docs = await db.collection(m.patients!).find({ patientId: { $in: ids } }, { projection: { patientId: 1, firstName: 1, lastName: 1 } }).toArray();
   return new Map(docs.map((p) => [String(p.patientId), [properName(p.firstName), properName(p.lastName)].filter(Boolean).join(" ")]));
+}
+
+const CLAIM_STATUS: Record<string, [ClaimStatusKey, string]> = {
+  queued: ["unsent", "Queued"], unsent: ["unsent", "Unsent"], hold: ["unsent", "On hold"],
+  sent: ["sent", "Sent"], resent: ["sent", "Resent"], pending: ["sent", "Pending"],
+  received: ["received", "Received"], paid: ["received", "Paid"], closed: ["closed", "Closed"],
+  denied: ["denied", "Denied"], rejected: ["denied", "Rejected"],
+};
+
+const isoOf = (v: unknown): string | null => {
+  const d = v instanceof Date ? v : typeof v === "string" && v ? new Date(v) : null;
+  return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+};
+const numOf = (v: unknown): number => (typeof v === "number" ? v : typeof v === "string" ? Number(v) || 0 : 0);
+
+/** Claims from the denticon-claims export joined with the ledger lines that carry the same claimId. */
+function denticonClaims(docs: Document[], lines: LedgerLine[], providers: Record<string, string>): Claim[] {
+  const byClaim = new Map<string, LedgerLine[]>();
+  for (const l of lines) if (l.claimId) byClaim.set(l.claimId, [...(byClaim.get(l.claimId) ?? []), l]);
+  const sum = (xs: number[]) => round2(xs.reduce((a, b) => a + b, 0));
+  const build = (claimId: string, d: Document | undefined): Claim => {
+    const ls = byClaim.get(claimId) ?? [];
+    const procs = ls.filter((l) => l.kind === "procedure");
+    const pays = ls.filter((l) => l.kind === "payment" && l.source === "insurance");
+    const adjs = ls.filter((l) => l.kind === "adjustment");
+    const raw = String(d?.claimStatus ?? "").trim();
+    const [status, statusLabel] = CLAIM_STATUS[raw.toLowerCase()] ?? (d ? ["other", raw || "Unknown"] : pays.length ? ["received", "Paid (no claim record)"] : ["other", "No claim record"]);
+    const dateSent = isoOf(d?.claimSentDate);
+    const dateReceived = pays.length ? pays.map((p) => p.date).sort().at(-1)! : null;
+    const effective: ClaimStatusKey = dateReceived && (status === "sent" || status === "unsent") ? "received" : status;
+    const providerId = d?.providerId != null ? String(d.providerId) : null;
+    const provider = providerId ? providers[providerId] ?? ([d?.providerFirstName, d?.providerLastName].filter((x) => typeof x === "string" && x).join(" ") || providerId) : null;
+    const codes = Array.isArray(d?.procedureCodeList) ? (d!.procedureCodeList as unknown[]).map(String) : [];
+    return {
+      claimId,
+      type: String(d?.claimType ?? "Primary"),
+      status: effective,
+      statusLabel: effective === "received" && status !== "received" ? `${statusLabel} · paid` : statusLabel,
+      carrier: typeof d?.carrierName === "string" && d.carrierName ? d.carrierName : null,
+      provider,
+      dateOfService: procs.length ? procs.map((p) => p.date).sort()[0]! : null,
+      dateSent,
+      dateReceived,
+      billed: d ? numOf(d.claimAmount) || sum(procs.map((p) => p.amount)) : sum(procs.map((p) => p.amount)),
+      estimate: numOf(d?.claimEstIns),
+      insurancePaid: sum(pays.map((p) => -p.amount)),
+      writeOff: sum(adjs.map((a) => Math.abs(a.amount))),
+      deductible: 0,
+      daysOutstanding: effective === "sent" ? daysSince(dateSent) : null,
+      procedures: procs.length
+        ? procs.map((p) => ({ procedureLedgerId: p.ledgerId, code: p.code, description: p.description, date: p.date, feeBilled: p.amount, estimate: p.estimatedInsurance, insurancePaid: p.payment?.insurancePaid ?? 0, writeOff: p.payment?.adjusted ?? 0 }))
+        : codes.map((c) => ({ procedureLedgerId: null, code: c, description: `Code ${c}`, date: null, feeBilled: 0, estimate: null, insurancePaid: 0, writeOff: 0 })),
+      payments: pays.map((p) => ({ id: p.id, date: p.date, description: p.description, amount: -p.amount, checkNum: null })),
+    };
+  };
+  const seen = new Set<string>();
+  const out: Claim[] = [];
+  for (const d of docs) {
+    const id = String(d.claimId ?? d.claimUId ?? "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(build(id, d));
+  }
+  for (const id of byClaim.keys()) if (!seen.has(id)) { seen.add(id); out.push(build(id, undefined)); }
+  const rank = (c: Claim) => (c.status === "unsent" ? 0 : c.status === "sent" ? 1 : 2);
+  return out.sort((a, b) => rank(a) - rank(b) || ((b.dateSent ?? b.dateOfService ?? "") < (a.dateSent ?? a.dateOfService ?? "") ? -1 : 1));
 }
 
 export const denticonAdapter: PmsAdapter = {
@@ -81,17 +150,19 @@ export const denticonAdapter: PmsAdapter = {
   async getPatient(db, m, patientId) {
     const patient = await db.collection(m.patients!).findOne({ patientId }, { projection: PATIENT_PROJECTION });
     if (!patient) return null;
-    const [txns, providers, allocationDocs, insuranceDocs] = await Promise.all([
+    const [txns, providers, allocationDocs, insuranceDocs, claimDocs] = await Promise.all([
       db.collection(m.transactions!).find({ patientId }).sort({ transactionDate: -1, createdOn: -1 }).limit(5000).toArray(),
       providersMap(db, m),
       m.allocations ? db.collection(m.allocations).find({ patientId }).limit(10000).toArray().catch(() => [] as Document[]) : Promise.resolve([] as Document[]),
       m.insurances ? db.collection(m.insurances).find({ patientId }, { projection: INSURANCE_PROJECTION }).toArray().catch(() => [] as Document[]) : Promise.resolve([] as Document[]),
+      m.claims ? db.collection(m.claims).find({ patientId }).limit(500).toArray().catch(() => [] as Document[]) : Promise.resolve([] as Document[]),
     ]);
     const summary = toPatientSummary(patient);
     summary.coverage = coverageByPatient(insuranceDocs).get(patientId) ?? summary.coverage;
     const lines = txns.map((t) => toLedgerLine(t, providers));
     applyAllocations(lines, allocationDocs.map(toAllocation));
     const visits = groupVisits(lines);
+    const claims = denticonClaims(claimDocs, lines, providers);
     const sum = (xs: number[]) => round2(xs.reduce((a, b) => a + b, 0));
     const treatments = lines.filter((l) => l.kind === "procedure");
     const paymentLines = lines.filter((l) => l.kind === "payment");
@@ -117,6 +188,7 @@ export const denticonAdapter: PmsAdapter = {
       treatments,
       visits,
       payments: paymentLines,
+      claims,
       providers,
       transactionCount: lines.length,
       notes: [],

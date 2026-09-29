@@ -22,6 +22,7 @@ export const PMS_COLLECTIONS: Record<PmsType, PmsCollectionSpec[]> = {
     { key: "allocations", label: "Payment allocations", default: "denticon-payment-allocations", required: false, hint: "links payments to charges" },
     { key: "providers", label: "Providers", default: "denticon-providers", required: false },
     { key: "insurances", label: "Patient insurances", default: "denticon-patient-insurances", required: false },
+    { key: "claims", label: "Claims", default: "denticon-claims", required: false, hint: "claims sent to carriers" },
   ],
   opendental: [
     { key: "patients", label: "Patients", default: "open-dental-patients", required: true },
@@ -30,6 +31,7 @@ export const PMS_COLLECTIONS: Record<PmsType, PmsCollectionSpec[]> = {
     { key: "payments", label: "Patient payments", default: "open-dental-payments", required: true },
     { key: "claimProcs", label: "Claim procedures", default: "open-dental-claim-procs", required: false, hint: "insurance payments and write-offs per procedure" },
     { key: "claimPayments", label: "Claim payments", default: "open-dental-claim-payments", required: false },
+    { key: "claims", label: "Claims", default: "open-dental-claims", required: false, hint: "claims sent to carriers" },
     { key: "providers", label: "Providers", default: "open-dental-providers", required: false },
     { key: "definitions", label: "Definitions", default: "open-dental-definitions", required: false, hint: "payment type names" },
     { key: "patientPlans", label: "Patient plans", default: "open-dental-patient-plans", required: false },

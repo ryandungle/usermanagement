@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { PMS_LABEL } from "@usermanagement/shared";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon, UsersIcon } from "lucide-react";
+import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon, UsersIcon, ChevronRightIcon, FileTextIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteHeader } from "@/components/site-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { api, ApiError, type AllocationLink, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
+import { api, ApiError, type AllocationLink, type Claim, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
 import { rememberedPatientsSearch } from "./Patients";
@@ -82,6 +82,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
 
   const { summary: p, totals, visits, payments, patient } = detail;
   const unapplied = payments.filter((l) => (l.applied?.unallocated ?? 0) > 0.005);
+  const openClaims = detail.claims.filter((c) => c.status === "sent" || c.status === "unsent").length;
   const age = ageFrom(p.birthDate);
   const address = [patient.addressLine1, patient.addressLine2, [p.city, p.state].filter(Boolean).join(", "), patient.zip]
     .filter((x): x is string => typeof x === "string" && x.trim() !== "")
@@ -170,6 +171,10 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             <TabsTrigger value="treatments">Treatments <Badge variant="secondary" className="ml-1 px-1.5">{totals.procedures}</Badge></TabsTrigger>
             <TabsTrigger value="visits">Visits <Badge variant="secondary" className="ml-1 px-1.5">{visits.filter((v) => v.procedures.length).length}</Badge></TabsTrigger>
             <TabsTrigger value="payments">Payments <Badge variant="secondary" className="ml-1 px-1.5">{payments.length}</Badge></TabsTrigger>
+            <TabsTrigger value="claims">
+              Claims <Badge variant="secondary" className="ml-1 px-1.5">{detail.claims.length}</Badge>
+              {openClaims > 0 && <Badge className="ml-1 bg-amber-500/15 px-1.5 text-amber-700 dark:text-amber-300">{openClaims} out</Badge>}
+            </TabsTrigger>
             {detail.familyAvailable && (
               <TabsTrigger value="family">Family {family && <Badge variant="secondary" className="ml-1 px-1.5">{family.members.length}</Badge>}</TabsTrigger>
             )}
@@ -212,12 +217,16 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><CreditCardIcon className="size-4" /> Payments</CardTitle>
-                <CardDescription>Every payment on the ledger, newest first.</CardDescription>
+                <CardDescription>Every payment on the ledger, newest first. Insurance checks are also tracked per claim in the Claims tab.</CardDescription>
               </CardHeader>
               <CardContent>
                 <LedgerTable lines={payments} columns={["date", "description", "source", "provider", "amount", "applied"]} emptyText="No payments recorded." source={detail.allocationSource} />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="claims">
+            <ClaimsCard claims={detail.claims} pmsLabel={PMS_LABEL[detail.pmsType] ?? "the practice system"} />
           </TabsContent>
 
           {detail.familyAvailable && (
@@ -603,5 +612,143 @@ function FamilyCard({ family, error, officeId, currentId, pmsLabel }: { family: 
         </div>
       )}
     </div>
+  );
+}
+
+const CLAIM_TONE: Record<Claim["status"], string> = {
+  unsent: "bg-muted text-muted-foreground",
+  sent: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  received: "bg-green-500/15 text-green-700 dark:text-green-300",
+  closed: "bg-green-500/15 text-green-700 dark:text-green-300",
+  denied: "bg-red-500/15 text-red-700 dark:text-red-300",
+  other: "bg-muted text-muted-foreground",
+};
+
+/** Claims sent to carriers and what came back, with the procedures and checks behind each one. */
+function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setOpen((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const out = claims.filter((c) => c.status === "sent");
+  const unsent = claims.filter((c) => c.status === "unsent");
+  const paid = claims.filter((c) => c.status === "received" || c.status === "closed");
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><FileTextIcon className="size-4" /> Claims</CardTitle>
+        <CardDescription>
+          {claims.length === 0 ? `No claims in the ${pmsLabel} export for this patient.` : (
+            <>
+              {claims.length} claim{claims.length === 1 ? "" : "s"} · {money(sum(claims.map((c) => c.billed)))} billed · {money(sum(claims.map((c) => c.insurancePaid)))} received
+              {out.length > 0 && <> · <span className="text-amber-600 dark:text-amber-400">{out.length} still out, {money(sum(out.map((c) => c.estimate)))} expected</span></>}
+              {unsent.length > 0 && <> · {unsent.length} not sent yet</>}
+              {paid.length > 0 && <> · {paid.length} received</>}
+            </>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {claims.length > 0 && (
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader className="bg-muted">
+                <TableRow>
+                  <TableHead className="w-8" />
+                  <TableHead>Service</TableHead>
+                  <TableHead>Sent</TableHead>
+                  <TableHead>Carrier</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Billed</TableHead>
+                  <TableHead className="text-right">Est. insurance</TableHead>
+                  <TableHead className="text-right">Ins. paid</TableHead>
+                  <TableHead className="text-right">Write-off</TableHead>
+                  <TableHead>Received</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {claims.map((c) => {
+                  const isOpen = open.has(c.claimId);
+                  const short = c.insurancePaid + 0.005 < c.estimate && (c.status === "received" || c.status === "closed");
+                  return (
+                    <React.Fragment key={c.claimId}>
+                      <TableRow className="cursor-pointer" onClick={() => toggle(c.claimId)}>
+                        <TableCell><ChevronRightIcon className={`text-muted-foreground size-4 transition-transform ${isOpen ? "rotate-90" : ""}`} /></TableCell>
+                        <TableCell className="whitespace-nowrap">{c.dateOfService ? dateLabel(c.dateOfService) : <span className="text-muted-foreground">—</span>}</TableCell>
+                        <TableCell className="whitespace-nowrap">{c.dateSent ? dateLabel(c.dateSent) : <span className="text-muted-foreground italic">not sent</span>}</TableCell>
+                        <TableCell className="max-w-56 truncate">{c.carrier ?? <span className="text-muted-foreground">—</span>}<div className="text-muted-foreground font-mono text-[11px]">#{c.claimId}{c.provider ? ` · ${c.provider}` : ""}</div></TableCell>
+                        <TableCell className="whitespace-nowrap">{c.type}</TableCell>
+                        <TableCell><span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${CLAIM_TONE[c.status]}`}>{c.statusLabel}</span></TableCell>
+                        <TableCell className="text-right tabular-nums">{money(c.billed)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{money(c.estimate)}</TableCell>
+                        <TableCell className={`text-right tabular-nums ${short ? "text-amber-600 dark:text-amber-400" : c.insurancePaid > 0 ? "text-green-600 dark:text-green-400" : ""}`}>{money(c.insurancePaid)}{short && <div className="text-[11px]">{money(c.estimate - c.insurancePaid)} under estimate</div>}</TableCell>
+                        <TableCell className="text-right tabular-nums">{c.writeOff ? money(c.writeOff) : ""}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {c.dateReceived ? dateLabel(c.dateReceived)
+                            : c.status === "sent" ? <span className="text-amber-600 dark:text-amber-400">{c.daysOutstanding ?? "?"} days out</span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell />
+                          <TableCell colSpan={10} className="py-3">
+                            <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+                              <div className="grid gap-1.5">
+                                <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Procedures on this claim</div>
+                                {c.procedures.length === 0 ? <div className="text-muted-foreground text-sm">No procedure lines in the export.</div> : (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>Date</TableHead>
+                                        <TableHead>Code</TableHead>
+                                        <TableHead>Procedure</TableHead>
+                                        <TableHead className="text-right">Billed</TableHead>
+                                        <TableHead className="text-right">Est.</TableHead>
+                                        <TableHead className="text-right">Ins. paid</TableHead>
+                                        <TableHead className="text-right">Write-off</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {c.procedures.map((p, i) => (
+                                        <TableRow key={`${p.procedureLedgerId ?? p.code}-${i}`}>
+                                          <TableCell className="text-muted-foreground whitespace-nowrap text-xs">{p.date ? dateLabel(p.date) : ""}</TableCell>
+                                          <TableCell className="font-mono text-xs">{p.code ?? ""}</TableCell>
+                                          <TableCell className="text-xs">{p.description}</TableCell>
+                                          <TableCell className="text-right text-xs tabular-nums">{money(p.feeBilled)}</TableCell>
+                                          <TableCell className="text-right text-xs tabular-nums">{p.estimate == null ? "" : money(p.estimate)}</TableCell>
+                                          <TableCell className="text-right text-xs tabular-nums">{money(p.insurancePaid)}</TableCell>
+                                          <TableCell className="text-right text-xs tabular-nums">{p.writeOff ? money(p.writeOff) : ""}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                )}
+                              </div>
+                              <div className="grid content-start gap-1.5">
+                                <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Payments received</div>
+                                {c.payments.length === 0 ? (
+                                  <div className="text-muted-foreground text-sm">{c.status === "sent" ? "Nothing received yet." : c.status === "unsent" ? "Claim has not been sent." : "No insurance payment recorded."}</div>
+                                ) : c.payments.map((p) => (
+                                  <div key={p.id} className="flex items-baseline justify-between gap-3 text-sm">
+                                    <span><span className="text-muted-foreground mr-2 text-xs">{dateLabel(p.date)}</span>{p.description}</span>
+                                    <span className="tabular-nums">{money(p.amount)}</span>
+                                  </div>
+                                ))}
+                                {c.deductible > 0 && <div className="text-muted-foreground text-xs">{money(c.deductible)} applied to deductible.</div>}
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

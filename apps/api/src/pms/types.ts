@@ -45,6 +45,14 @@ export interface PmsAdapter {
   getFamily?(db: Db, m: PmsMapping, patientId: string): Promise<FamilySummary | null>;
 }
 
+/** Days between an ISO date and now, floored at zero. */
+export function daysSince(isoDate: string | null | undefined): number | null {
+  if (!isoDate) return null;
+  const t = Date.parse(isoDate);
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
 /** Shared string-range + date-range matcher for fields stored as either. */
 export function dateFieldRange(field: string, from?: string, to?: string): Record<string, unknown> | null {
   if (!from && !to) return null;

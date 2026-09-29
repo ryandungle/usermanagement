@@ -5,6 +5,8 @@ import {
   groupVisits,
   type Allocation,
   type AllocationLink,
+  type Claim,
+  type ClaimStatusKey,
   type Coverage,
   type FamilyMember,
   type FamilySummary,
@@ -18,7 +20,7 @@ import {
   type ProcedureRow,
 } from "../lib/denticon.js";
 import { toPlain } from "../lib/mongo.js";
-import { dateFieldRange, escapeRegex, round2, type PatientListQuery, type PmsAdapter, type ProcedureGroupResult, type ProcedureListResult, type SortSpec } from "./types.js";
+import { dateFieldRange, daysSince, escapeRegex, round2, type PatientListQuery, type PmsAdapter, type ProcedureGroupResult, type ProcedureListResult, type SortSpec } from "./types.js";
 
 /**
  * Open Dental export (native table shapes): patient.PatNum, procedurelog with
@@ -50,6 +52,23 @@ const PAT_STATUS_ACTIVE = "0"; // Patient (1 NonPatient, 2 Inactive, 3 Archived,
 const PROC_COMPLETE = "2"; // TP=1, C=2, EC=3, EO=4, R=5, D=6, Cn=7
 const CLAIMPROC_PAID = new Set(["1", "3", "4"]); // Received, Supplemental, CapClaim
 const PLAN_TYPE: Record<string, string> = { p: "PPO", f: "Flat copay", c: "Capitation", "": "Percentage" };
+const OD_CLAIM_STATUS: Record<string, [ClaimStatusKey, string]> = { U: ["unsent", "Unsent"], H: ["unsent", "Hold for secondary"], W: ["unsent", "Waiting to send"], S: ["sent", "Sent"], R: ["received", "Received"] };
+const OD_CLAIM_TYPE: Record<string, string> = { P: "Primary", S: "Secondary", PreAuth: "Pre-authorization", Other: "Other", Cap: "Capitation" };
+const CLAIM_PROJECTION = { ClaimNum: 1, PatNum: 1, ClaimType: 1, ClaimStatus: 1, DateService: 1, DateSent: 1, DateSentOrig: 1, DateReceived: 1, ClaimFee: 1, InsPayEst: 1, InsPayAmt: 1, WriteOff: 1, DedApplied: 1, PlanNum: 1, ProvTreat: 1 } as const;
+
+/** Carrier names keyed by PlanNum. */
+async function carrierNamesByPlan(db: Db, m: PmsMapping, planNums: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = [...new Set(planNums)];
+  if (ids.length === 0 || !m.insurancePlans) return out;
+  const plans = await db.collection(m.insurancePlans).find({ PlanNum: { $in: ids } }, { projection: { PlanNum: 1, CarrierNum: 1 } }).toArray().catch(() => []);
+  const carriers = m.insuranceCarriers && plans.length
+    ? await db.collection(m.insuranceCarriers).find({ CarrierNum: { $in: [...new Set(plans.map((p) => String(p.CarrierNum)))] } }, { projection: { CarrierNum: 1, CarrierName: 1 } }).toArray().catch(() => [])
+    : [];
+  const carrierByNum = new Map(carriers.map((c) => [String(c.CarrierNum), String(c.CarrierName ?? "")]));
+  for (const p of plans) out.set(String(p.PlanNum), carrierByNum.get(String(p.CarrierNum)) || `Carrier ${p.CarrierNum}`);
+  return out;
+}
 const RELATION: Record<string, string> = { "0": "Self", "1": "Spouse", "2": "Child", "3": "Employee", "4": "Handicap dependent", "5": "Significant other", "6": "Injured plaintiff", "7": "Life partner", "8": "Dependent" };
 
 const PATIENT_PROJECTION = {
@@ -442,7 +461,7 @@ export const opendentalAdapter: PmsAdapter = {
       woGroups.set(k, g);
     }
     for (const [k, g] of woGroups) {
-      lines.push({ id: k, ledgerId: k, kind: "adjustment", date: g.date, dateOfService: g.date.slice(0, 10), code: null, description: g.desc, amount: -round2(g.amount), fee: null, tooth: null, surface: null, providerId: null, provider: null, ledgerType: "A", ledgerType2: null, claimId: null, treatPlanId: null, estimatedInsurance: null, estimatedPatient: null });
+      lines.push({ id: k, ledgerId: k, kind: "adjustment", date: g.date, dateOfService: g.date.slice(0, 10), code: null, description: g.desc, amount: -round2(g.amount), fee: null, tooth: null, surface: null, providerId: null, provider: null, ledgerType: "A", ledgerType2: null, claimId: null, treatPlanId: null, estimatedInsurance: null, estimatedPatient: null, source: "insurance" });
     }
     // Patient payments (account level: the export has no paysplit rows).
     const payTypes = new Map<string, string>();
@@ -493,6 +512,63 @@ export const opendentalAdapter: PmsAdapter = {
       if (refunded > 0) pay.description += ` · ${refunded.toFixed(2)} refunded`;
       pay.applied = { total, unallocated: round2(Math.max(0, amount - total - refunded)), procedures: new Set(items.map((i) => i.procedureLedgerId)).size, items };
     }
+    // Claims: what went out and what came back, from open-dental-claims joined with claim procs and claim payments.
+    const claimDocs = m.claims ? await db.collection(m.claims).find({ PatNum: patientId }, { projection: CLAIM_PROJECTION }).limit(500).toArray().catch(() => [] as Document[]) : [];
+    const carrierByPlan = await carrierNamesByPlan(db, m, claimDocs.map((c) => String(c.PlanNum ?? "")).filter((x) => x && x !== "0"));
+    const cpsByClaim = new Map<string, Document[]>();
+    for (const cp of claimProcs) {
+      const k = String(cp.ClaimNum ?? "0");
+      if (k === "0") continue;
+      cpsByClaim.set(k, [...(cpsByClaim.get(k) ?? []), cp]);
+    }
+    const claims: Claim[] = claimDocs.map((c) => {
+      const id = String(c.ClaimNum);
+      const cps = (cpsByClaim.get(id) ?? []).filter((cp) => !["6", "7"].includes(String(cp.Status)));
+      const rawStatus = String(c.ClaimStatus ?? "").toUpperCase();
+      const [status, statusLabel] = OD_CLAIM_STATUS[rawStatus] ?? ["other", rawStatus || "Unknown"];
+      const dateSent = iso(c.DateSent) ?? iso(c.DateSentOrig);
+      const received = status === "received" ? iso(c.DateReceived) : null;
+      const dateReceived = received && received > "2002" ? received : null;
+      const payGroups = new Map<string, { date: string; amount: number; checkNum: string | null; carrier: string | null }>();
+      for (const cp of cps) {
+        if (!CLAIMPROC_PAID.has(String(cp.Status)) || num(cp.InsPayAmt) === 0) continue;
+        const k = String(cp.ClaimPaymentNum ?? "0");
+        const chk = cpByNum.get(k);
+        const g = payGroups.get(k) ?? { date: iso(chk?.CheckDate) ?? iso(cp.DateCP) ?? dateSent ?? "", amount: 0, checkNum: str(chk?.CheckNum), carrier: str(chk?.CarrierName) };
+        g.amount = round2(g.amount + num(cp.InsPayAmt));
+        payGroups.set(k, g);
+      }
+      const cpPaid = round2(cps.reduce((a, cp) => a + (CLAIMPROC_PAID.has(String(cp.Status)) ? num(cp.InsPayAmt) : 0), 0));
+      const cpWo = round2(cps.reduce((a, cp) => a + (CLAIMPROC_PAID.has(String(cp.Status)) ? num(cp.WriteOff) : 0), 0));
+      const type = String(c.ClaimType ?? "");
+      const providerId = str(c.ProvTreat);
+      return {
+        claimId: id,
+        type: OD_CLAIM_TYPE[type] ?? type,
+        status,
+        statusLabel,
+        carrier: carrierByPlan.get(String(c.PlanNum)) ?? null,
+        provider: providerId ? providers[providerId] ?? providerId : null,
+        dateOfService: iso(c.DateService),
+        dateSent,
+        dateReceived,
+        billed: num(c.ClaimFee),
+        estimate: num(c.InsPayEst),
+        insurancePaid: num(c.InsPayAmt) || cpPaid,
+        writeOff: num(c.WriteOff) || cpWo,
+        deductible: num(c.DedApplied),
+        daysOutstanding: status === "sent" ? daysSince(dateSent) : null,
+        procedures: cps.map((cp) => {
+          const proc = procByKey.get(String(cp.ProcNum));
+          const paid = CLAIMPROC_PAID.has(String(cp.Status));
+          return { procedureLedgerId: str(cp.ProcNum), code: proc?.code ?? str(cp.CodeSent), description: proc?.description ?? (cp.CodeSent ? `Code ${cp.CodeSent}` : `Procedure ${cp.ProcNum}`), date: proc?.date ?? iso(cp.ProcDate), feeBilled: num(cp.FeeBilled), estimate: num(cp.InsPayEst), insurancePaid: paid ? num(cp.InsPayAmt) : 0, writeOff: paid ? num(cp.WriteOff) : 0 };
+        }),
+        payments: [...payGroups.entries()].map(([k, g]) => ({ id: `claimpayment:${k}`, date: g.date, description: `${g.carrier ?? "Insurance"}${g.checkNum ? ` · check ${g.checkNum}` : ""}`, amount: g.amount, checkNum: g.checkNum })),
+      };
+    });
+    const rank = (c: Claim) => (c.status === "unsent" ? 0 : c.status === "sent" ? 1 : 2);
+    claims.sort((a, b) => rank(a) - rank(b) || ((b.dateSent ?? b.dateOfService ?? "") < (a.dateSent ?? a.dateOfService ?? "") ? -1 : 1));
+
     const guarantor = str(patient.Guarantor);
     const pmsBalance = typeof patient.BalTotal === "number" ? patient.BalTotal : num(patient.BalTotal) || null;
 
@@ -514,6 +590,7 @@ export const opendentalAdapter: PmsAdapter = {
       treatments,
       visits,
       payments: paymentLines,
+      claims,
       providers,
       transactionCount: lines.length,
       notes: [
