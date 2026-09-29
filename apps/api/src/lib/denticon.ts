@@ -246,6 +246,8 @@ export interface PatientDetail {
   treatments: LedgerLine[];
   visits: Visit[];
   payments: LedgerLine[];
+  /** Account adjustments (write-offs, corrections), newest first. */
+  adjustments: LedgerLine[];
   claims: Claim[];
   providers: Record<string, string>;
   transactionCount: number;
@@ -377,30 +379,18 @@ export function applyAllocations(lines: LedgerLine[], allocations: Allocation[])
 export function groupVisits(lines: LedgerLine[]): Visit[] {
   const byDate = new Map<string, Visit>();
   for (const line of lines) {
-    // Insurance money is tracked per claim, not per visit.
-    if (line.source === "insurance") continue;
+    // A visit is what was done that day. Payments live on the Payments tab and insurance money per claim.
+    if (line.kind !== "procedure") continue;
     let v = byDate.get(line.dateOfService);
     if (!v) {
       v = { dateOfService: line.dateOfService, providers: [], procedures: [], payments: [], adjustments: [], notes: [], charges: 0, paid: 0, adjusted: 0 };
       byDate.set(line.dateOfService, v);
     }
-    switch (line.kind) {
-      case "procedure":
-        v.procedures.push(line);
-        v.charges = round2(v.charges + line.amount);
-        if (line.provider && !v.providers.includes(line.provider)) v.providers.push(line.provider);
-        break;
-      case "payment":
-        v.payments.push(line);
-        v.paid = round2(v.paid + -line.amount);
-        break;
-      case "adjustment":
-        v.adjustments.push(line);
-        v.adjusted = round2(v.adjusted + line.amount);
-        break;
-      default:
-        v.notes.push(line);
-    }
+    v.procedures.push(line);
+    v.charges = round2(v.charges + line.amount);
+    v.paid = round2(v.paid + (line.payment?.paid ?? 0));
+    v.adjusted = round2(v.adjusted + (line.payment?.adjusted ?? 0));
+    if (line.provider && !v.providers.includes(line.provider)) v.providers.push(line.provider);
   }
   return [...byDate.values()].sort((a, b) => (a.dateOfService < b.dateOfService ? 1 : -1));
 }

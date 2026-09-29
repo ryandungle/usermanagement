@@ -200,6 +200,17 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
                 <LedgerTable lines={payments} columns={["date", "description", "source", "provider", "amount", "applied"]} emptyText="No payments recorded." source={detail.allocationSource} />
               </CardContent>
             </Card>
+            {detail.adjustments.length > 0 && (
+              <Card className="mt-4">
+                <CardHeader>
+                  <CardTitle className="text-base">Adjustments</CardTitle>
+                  <CardDescription>Write-offs and corrections on the account, newest first. They reduce the balance without money changing hands.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <LedgerTable lines={detail.adjustments} columns={["date", "description", "source", "provider", "amount", "applied"]} source={detail.allocationSource} />
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="claims">
@@ -255,23 +266,12 @@ function VisitCard({ visit, source }: { visit: Visit; source?: string }) {
         </CardTitle>
         <CardDescription className="flex flex-wrap gap-x-4">
           {hasProcedures && <span>{visit.procedures.length} procedure{visit.procedures.length === 1 ? "" : "s"} · {money(visit.charges)}</span>}
-          {visit.payments.length > 0 && <span>Paid {money(visit.paid)}</span>}
-          {visit.adjustments.length > 0 && <span>Adjusted {money(visit.adjusted)}</span>}
+          {visit.procedures.length > 0 && <span>Insurance + patient paid {money(visit.procedures.reduce((a, l) => a + (l.payment?.paid ?? 0) + (l.payment?.adjusted ?? 0), 0))}</span>}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
         {hasProcedures && (
           <LedgerTable lines={visit.procedures} columns={["code", "description", "tooth", "surface", "provider", "amount", "paid", "status"]} footer={{ label: "Charges", value: visit.charges }} source={source} />
-        )}
-        {visit.payments.length > 0 && (
-          <Section title="Payments">
-            <LedgerTable lines={visit.payments} columns={["description", "source", "provider", "amount"]} />
-          </Section>
-        )}
-        {visit.adjustments.length > 0 && (
-          <Section title="Adjustments">
-            <LedgerTable lines={visit.adjustments} columns={["description", "provider", "amount"]} />
-          </Section>
         )}
         {visit.notes.length > 0 && (
           <ul className="text-muted-foreground grid gap-1 text-xs">

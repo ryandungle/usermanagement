@@ -267,6 +267,7 @@ export interface PatientDetail {
   treatments: LedgerLine[];
   visits: Visit[];
   payments: LedgerLine[];
+  adjustments: LedgerLine[];
   claims: Claim[];
   providers: Record<string, string>;
   transactionCount: number;

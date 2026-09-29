@@ -188,6 +188,7 @@ export const denticonAdapter: PmsAdapter = {
       treatments,
       visits,
       payments: paymentLines,
+      adjustments: lines.filter((l) => l.kind === "adjustment").sort((a, b) => (a.date < b.date ? 1 : -1)),
       claims,
       providers,
       transactionCount: lines.length,
