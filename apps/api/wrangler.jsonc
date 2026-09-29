@@ -5,6 +5,12 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+
+  // One Durable Object per office keeps a warm MongoDB connection pool.
+  "durable_objects": {
+    "bindings": [{ "name": "MONGO_POOL", "class_name": "MongoPool" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MongoPool"] }],
   "minify": true,
 
   // The built React app is served as static assets from the same Worker,

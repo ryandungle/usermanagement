@@ -3,10 +3,11 @@ import { z } from "zod";
 import { createDb, eq, officeConnector, type Database } from "@usermanagement/db";
 import { scopeContains } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
-import { decryptSecret, encryptSecret } from "../lib/crypto.js";
-import { inferFields, isSafeCollectionName, orderCollections, parseMongoUrl, toPlain, withClient } from "../lib/mongo.js";
+import { encryptSecret } from "../lib/crypto.js";
+import { isSafeCollectionName, parseMongoUrl } from "../lib/mongo.js";
 import { officeAsScope, resolveOffice, type ResolvedOffice } from "../lib/scope.js";
 import { getActor, requireRank } from "../middleware/auth.js";
+import type { DocsResult } from "../durable/mongo-pool.js";
 
 const idParam = z.object({ id: z.uuid() });
 
@@ -35,18 +36,22 @@ function present(row: typeof officeConnector.$inferSelect) {
   };
 }
 
-/** Ping + list collections. Returns names or an error message. */
-async function probe(url: string, database: string): Promise<{ collections: string[] } | { error: string }> {
+function errorText(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.length > 300 ? msg.slice(0, 300) + "…" : msg;
+}
+
+/** The office's pool object. Same id for the same office, so the pool is reused. */
+function pool(c: Context<AppEnv>, officeId: string) {
+  return c.env.MONGO_POOL.get(c.env.MONGO_POOL.idFromName(officeId));
+}
+
+/** Ping + list collections through the office's pool. Returns names or an error message. */
+async function probe(c: Context<AppEnv>, officeId: string, urlEncrypted: string, database: string): Promise<{ collections: string[] } | { error: string }> {
   try {
-    return await withClient(url, async (client) => {
-      const db = client.db(database);
-      await db.command({ ping: 1 });
-      const list = await db.listCollections({}, { nameOnly: true }).toArray();
-      return { collections: orderCollections(list.map((c) => c.name).filter(isSafeCollectionName)) };
-    });
+    return { collections: await pool(c, officeId).probe(urlEncrypted, database) };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { error: msg.length > 300 ? msg.slice(0, 300) + "…" : msg };
+    return { error: errorText(err) };
   }
 }
 
@@ -91,12 +96,13 @@ export const connectorRoute = new Hono<AppEnv>()
     const parsed = parseMongoUrl(body.data.url, body.data.database);
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
-    const probed = await probe(body.data.url, parsed.database);
+    const urlEncrypted = await encryptSecret(c.env.BETTER_AUTH_SECRET, body.data.url);
+    const probed = await probe(c, r.office.officeId, urlEncrypted, parsed.database);
     if ("error" in probed) return c.json({ error: `Connection failed: ${probed.error}` }, 400);
 
     const values = {
       type: body.data.type,
-      urlEncrypted: await encryptSecret(c.env.BETTER_AUTH_SECRET, body.data.url),
+      urlEncrypted,
       host: parsed.host,
       database: parsed.database,
       collections: JSON.stringify(probed.collections),
@@ -119,8 +125,7 @@ export const connectorRoute = new Hono<AppEnv>()
     if ("error" in r) return r.error;
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
-    const url = await decryptSecret(c.env.BETTER_AUTH_SECRET, row.urlEncrypted);
-    const probed = await probe(url, row.database);
+    const probed = await probe(c, r.office.officeId, row.urlEncrypted, row.database);
     const [updated] = await db
       .update(officeConnector)
       .set(
@@ -138,6 +143,7 @@ export const connectorRoute = new Hono<AppEnv>()
     const r = await loadOfficeForActor(c, db);
     if ("error" in r) return r.error;
     await db.delete(officeConnector).where(eq(officeConnector.officeId, r.office.officeId));
+    await pool(c, r.office.officeId).reset().catch(() => {});
     return c.json({ data: { success: true } });
   })
 
@@ -148,19 +154,11 @@ export const connectorRoute = new Hono<AppEnv>()
     if ("error" in r) return r.error;
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
-    const url = await decryptSecret(c.env.BETTER_AUTH_SECRET, row.urlEncrypted);
     try {
-      const data = await withClient(url, async (client) => {
-        const mdb = client.db(row.database);
-        const list = await mdb.listCollections({}, { nameOnly: true }).toArray();
-        const names = orderCollections(list.map((x) => x.name).filter(isSafeCollectionName));
-        return Promise.all(
-          names.map(async (name) => ({ name, count: await mdb.collection(name).estimatedDocumentCount().catch(() => null) })),
-        );
-      });
+      const data = await pool(c, r.office.officeId).listCollections(row.urlEncrypted, row.database);
       return c.json({ data });
     } catch (err) {
-      return c.json({ error: `Connection failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
+      return c.json({ error: `Connection failed: ${errorText(err)}` }, 502);
     }
   })
 
@@ -177,32 +175,15 @@ export const connectorRoute = new Hono<AppEnv>()
 
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
-    const url = await decryptSecret(c.env.BETTER_AUTH_SECRET, row.urlEncrypted);
-
     try {
-      const result = await withClient(url, async (client) => {
-        const coll = client.db(row.database).collection(collection);
-        let filter: Record<string, unknown> = {};
-        if (q) {
-          // Find string fields from a small sample, then regex-match any of them.
-          const sample = await coll.find({}, { limit: 50 }).toArray();
-          const stringFields = new Set<string>();
-          for (const d of sample) for (const [k, v] of Object.entries(d)) if (typeof v === "string") stringFields.add(k);
-          const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          filter = stringFields.size ? { $or: [...stringFields].map((f) => ({ [f]: { $regex: escaped, $options: "i" } })) } : { _id: null };
-        }
-        const [docs, total] = await Promise.all([
-          coll.find(filter).sort({ _id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
-          coll.countDocuments(filter, { limit: 100_000 }),
-        ]);
-        return { docs: docs.map((d) => toPlain(d) as Record<string, unknown>), fields: inferFields(docs), total };
-      });
+      // Documents are plain JSON (BSON converted in the object); the RPC stub types cannot express `unknown`.
+      const result = (await pool(c, r.office.officeId).findDocuments(row.urlEncrypted, row.database, collection, { q, page, pageSize })) as unknown as DocsResult;
       return c.json({
         data: result.docs,
         fields: result.fields,
         pagination: { page, pageSize, total: result.total, totalPages: Math.max(1, Math.ceil(result.total / pageSize)) },
       });
     } catch (err) {
-      return c.json({ error: `Query failed: ${err instanceof Error ? err.message : String(err)}` }, 502);
+      return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
     }
   });

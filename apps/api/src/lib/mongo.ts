@@ -1,4 +1,4 @@
-import { MongoClient, type Document } from "mongodb";
+import type { Document } from "mongodb";
 
 /** Collections we surface first when present (clinic domain). */
 export const PREFERRED_COLLECTIONS = ["patient", "appointment", "payment", "procedure"];
@@ -25,27 +25,6 @@ export function parseMongoUrl(raw: string, databaseOverride?: string): ParsedMon
   if (!database) return { error: "Include the database name in the URL path (…/mydb) or set it explicitly" };
   if (/[\/\\. "$*<>:|?]/.test(database)) return { error: "Invalid database name" };
   return { host, database };
-}
-
-/** Open a short-lived client. Workers cannot keep sockets across requests, so callers must close it. */
-export function openClient(url: string) {
-  return new MongoClient(url, {
-    serverSelectionTimeoutMS: 8000,
-    connectTimeoutMS: 8000,
-    socketTimeoutMS: 15000,
-    maxPoolSize: 2,
-    appName: "usermanagement",
-  } as ConstructorParameters<typeof MongoClient>[1]);
-}
-
-export async function withClient<T>(url: string, fn: (client: MongoClient) => Promise<T>): Promise<T> {
-  const client = openClient(url);
-  try {
-    await client.connect();
-    return await fn(client);
-  } finally {
-    await client.close().catch(() => {});
-  }
 }
 
 const SYSTEM_PREFIX = "system.";
