@@ -11,6 +11,7 @@ import { SiteHeader } from "@/components/site-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useQuery } from "@tanstack/react-query";
+import { SortHead } from "@/components/sort-head";
 import { api, errorMessage, type AllocationLink, type Claim, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
@@ -602,8 +603,42 @@ const CLAIM_TONE: Record<Claim["status"], string> = {
 };
 
 /** Claims sent to carriers and what came back, with the procedures and checks behind each one. */
-function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string }) {
+type ClaimSort = "service" | "sent" | "carrier" | "status" | "billed" | "estimate" | "paid" | "writeOff" | "received";
+const CLAIM_STATUS_RANK: Record<Claim["status"], number> = { unsent: 0, sent: 1, denied: 2, received: 3, closed: 4, other: 5 };
+const CLAIM_SORT_VALUE: Record<ClaimSort, (c: Claim) => string | number> = {
+  service: (c) => c.dateOfService ?? "",
+  sent: (c) => c.dateSent ?? "",
+  carrier: (c) => (c.carrier ?? "").toLowerCase(),
+  status: (c) => CLAIM_STATUS_RANK[c.status],
+  billed: (c) => c.billed,
+  estimate: (c) => c.estimate,
+  paid: (c) => c.insurancePaid,
+  writeOff: (c) => c.writeOff,
+  received: (c) => c.dateReceived ?? (c.status === "sent" ? `~${String(c.daysOutstanding ?? 0).padStart(6, "0")}` : ""),
+};
+
+function ClaimsCard({ claims: input, pmsLabel }: { claims: Claim[]; pmsLabel: string }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<ClaimSort>("service");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const onSort = (f: string) => {
+    const field = f as ClaimSort;
+    if (field === sort) setOrder(order === "asc" ? "desc" : "asc");
+    else {
+      setSort(field);
+      setOrder(field === "carrier" || field === "status" ? "asc" : "desc");
+    }
+  };
+  const claims = useMemo(() => {
+    const val = CLAIM_SORT_VALUE[sort];
+    const dir = order === "asc" ? 1 : -1;
+    return [...input].sort((a, b) => {
+      const x = val(a);
+      const y = val(b);
+      const cmp = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+      return cmp !== 0 ? cmp * dir : b.claimId.localeCompare(a.claimId);
+    });
+  }, [input, sort, order]);
   const toggle = (id: string) => setOpen((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
   const out = claims.filter((c) => c.status === "sent");
@@ -631,16 +666,16 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
               <TableHeader className="bg-muted">
                 <TableRow>
                   <TableHead className="w-8" />
-                  <TableHead>Service</TableHead>
-                  <TableHead>Sent</TableHead>
-                  <TableHead>Carrier</TableHead>
+                  <SortHead label="Service" field="service" sort={sort} order={order} onSort={onSort} />
+                  <SortHead label="Sent" field="sent" sort={sort} order={order} onSort={onSort} />
+                  <SortHead label="Carrier" field="carrier" sort={sort} order={order} onSort={onSort} />
                   <TableHead className="hidden 2xl:table-cell">Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Billed</TableHead>
-                  <TableHead className="hidden text-right md:table-cell">Est. ins.</TableHead>
-                  <TableHead className="text-right">Ins. paid</TableHead>
-                  <TableHead className="hidden text-right lg:table-cell">Write-off</TableHead>
-                  <TableHead>Received</TableHead>
+                  <SortHead label="Status" field="status" sort={sort} order={order} onSort={onSort} />
+                  <SortHead label="Billed" field="billed" sort={sort} order={order} onSort={onSort} right />
+                  <SortHead label="Est. ins." field="estimate" sort={sort} order={order} onSort={onSort} right className="hidden md:table-cell" />
+                  <SortHead label="Ins. paid" field="paid" sort={sort} order={order} onSort={onSort} right />
+                  <SortHead label="Write-off" field="writeOff" sort={sort} order={order} onSort={onSort} right className="hidden lg:table-cell" />
+                  <SortHead label="Received" field="received" sort={sort} order={order} onSort={onSort} />
                 </TableRow>
               </TableHeader>
               <TableBody>

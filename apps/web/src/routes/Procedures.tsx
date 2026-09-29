@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, BuildingIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, LoaderIcon, SearchIcon, XIcon } from "lucide-react";
+import { BuildingIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, LoaderIcon, SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { DateRangePicker } from "@/components/date-range-picker";
 import { ColumnPicker } from "@/components/office/column-picker";
 import { rememberOffice, rememberState, rememberedState } from "@/lib/remembered";
 import { useQuery } from "@tanstack/react-query";
+import { SortHead } from "@/components/sort-head";
 import { api, errorMessage, type GroupSort, type Office, type ProcedureGroup, type ProcedureGroupBy, type ProcedureRow, type ProcedureSort } from "@/lib/api";
 import { dateLabel, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
@@ -86,19 +87,6 @@ function useColumns<K extends string>(storageKey: string, all: K[]) {
     } catch {}
   };
   return [visible, choose] as const;
-}
-
-function SortHead({ label, field, sort, order, onSort, right }: { label: string; field?: string; sort?: string; order: "asc" | "desc"; onSort: (f: string) => void; right?: boolean }) {
-  if (!field) return <TableHead className={right ? "text-right" : ""}>{label}</TableHead>;
-  const active = sort === field;
-  return (
-    <TableHead className={right ? "text-right" : ""}>
-      <button type="button" className={`hover:text-foreground inline-flex h-8 items-center gap-1 rounded-md px-2 ${right ? "-mr-2" : "-ml-2"}`} onClick={() => onSort(field)} aria-sort={active ? (order === "asc" ? "ascending" : "descending") : "none"}>
-        {label}
-        {active ? (order === "asc" ? <ArrowUpIcon className="size-3.5" /> : <ArrowDownIcon className="size-3.5" />) : <ArrowUpDownIcon className="size-3.5 opacity-40" />}
-      </button>
-    </TableHead>
-  );
 }
 
 // ---- page -----------------------------------------------------------------------
