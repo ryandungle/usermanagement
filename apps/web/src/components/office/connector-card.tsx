@@ -97,7 +97,13 @@ export function ConnectorCard({
             <Row label="Type">MongoDB</Row>
             <Row label="Host">{connector.host}</Row>
             <Row label="Database">{connector.database}</Row>
-            <Row label="Collections">{connector.collections.length ? connector.collections.join(", ") : "none found"}</Row>
+            <Row label="Collections">
+              {connector.collections.length === 0
+                ? "none found"
+                : connector.collections.length <= 6
+                  ? connector.collections.join(", ")
+                  : `${connector.collections.length} collections (${connector.collections.slice(0, 5).join(", ")}, …)`}
+            </Row>
             <Row label="Last tested">{connector.lastTestedAt ? new Date(connector.lastTestedAt).toLocaleString() : "never"}</Row>
             {connector.status === "error" && connector.lastError && (
               <p className="text-destructive text-xs">{connector.lastError}</p>
