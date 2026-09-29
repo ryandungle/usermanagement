@@ -97,7 +97,22 @@ pnpm seed:admin you@example.com 'a-strong-password' "Your Name"
 Open http://localhost:5173, sign in, then use **Organization** to create a
 client, a company and an office, and **Users** to add people at each level.
 
-## Deploy to Cloudflare
+## One-shot provision + deploy
+
+With a Neon API key and a Cloudflare API token in your environment, this
+creates the database, migrates, seeds the first app admin and deploys:
+
+```bash
+export NEON_API_KEY=...            # console.neon.tech → Account settings → API keys
+export CLOUDFLARE_API_TOKEN=...    # dash.cloudflare.com → API tokens (Workers Scripts:Edit, Account Settings:Read)
+ADMIN_EMAIL=you@example.com pnpm provision
+```
+
+It is idempotent: re-running reuses the Neon project with the same name and
+redeploys. Set `SKIP_NEON=1` to reuse `DATABASE_URL` from `.env`, or
+`SKIP_DEPLOY=1` to stop after migrate + seed.
+
+## Deploy to Cloudflare (manual)
 
 ```bash
 cd apps/api

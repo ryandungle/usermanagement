@@ -18,7 +18,8 @@
     "db:migrate": "pnpm --filter @usermanagement/db db:migrate",
     "db:push": "pnpm --filter @usermanagement/db db:push",
     "db:studio": "pnpm --filter @usermanagement/db db:studio",
-    "seed:admin": "pnpm --filter @usermanagement/auth seed:admin"
+    "seed:admin": "pnpm --filter @usermanagement/auth seed:admin",
+    "provision": "node scripts/provision.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
