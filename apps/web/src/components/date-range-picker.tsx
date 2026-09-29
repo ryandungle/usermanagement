@@ -68,25 +68,19 @@ export function DateRangePicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={`h-8 justify-start font-normal ${active ? "" : "text-muted-foreground"}`}>
-          <CalendarIcon />
-          {label}
-          {active && (
-            <span
-              role="button"
-              aria-label="Clear dates"
-              className="hover:bg-muted ml-1 rounded-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange({});
-              }}
-            >
-              <XIcon className="size-3.5" />
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <div className="flex items-center">
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className={`h-8 justify-start font-normal ${active ? "rounded-r-none" : "text-muted-foreground"}`}>
+            <CalendarIcon />
+            {label}
+          </Button>
+        </PopoverTrigger>
+        {active && (
+          <Button variant="outline" size="icon" className="size-8 rounded-l-none border-l-0" aria-label="Clear dates" onClick={() => onChange({})}>
+            <XIcon className="size-3.5" />
+          </Button>
+        )}
+      </div>
       <PopoverContent className="w-auto p-0" align="start">
         <div className="flex">
           <div className="flex w-40 flex-col gap-1 border-r p-2">
