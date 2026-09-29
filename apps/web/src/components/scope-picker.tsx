@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ROLE_LEVEL, type Role, type ScopeLevel } from "@usermanagement/shared";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { MultiSelect } from "@/components/multi-select";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, type Client, type Company, type Me, type Office } from "@/lib/api";
 
@@ -79,32 +79,17 @@ export function ScopePicker({ me, role, value, onChange, lockCompany = false }: 
       )}
       {showOffice && (
         <div className="grid gap-2">
-          <Label>Offices</Label>
-          {!companyId ? (
-            <p className="text-muted-foreground text-sm">Choose a company first.</p>
-          ) : offices.length === 0 ? (
-            <p className="text-muted-foreground text-sm">This company has no offices yet.</p>
-          ) : (
-            <div className="grid max-h-48 gap-2 overflow-y-auto rounded-md border p-3">
-              {offices.map((o) => {
-                const checked = (value.officeIds ?? []).includes(o.id);
-                return (
-                  <label key={o.id} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(on) => {
-                        const set = new Set(value.officeIds ?? []);
-                        if (on) set.add(o.id);
-                        else set.delete(o.id);
-                        onChange({ ...value, officeIds: [...set] });
-                      }}
-                    />
-                    {o.name}
-                  </label>
-                );
-              })}
-            </div>
-          )}
+          <Label htmlFor="scope-offices">Offices</Label>
+          <MultiSelect
+            id="scope-offices"
+            disabled={!companyId}
+            options={offices.map((o) => ({ value: o.id, label: o.name }))}
+            value={value.officeIds ?? []}
+            onChange={(ids) => onChange({ ...value, officeIds: ids })}
+            placeholder={!companyId ? "Choose a company first" : offices.length === 0 ? "This company has no offices yet" : "Select offices"}
+            searchPlaceholder="Search offices…"
+            emptyText="No office matches."
+          />
           <p className="text-muted-foreground text-xs">A person can work at several locations of the same legal entity.</p>
         </div>
       )}
