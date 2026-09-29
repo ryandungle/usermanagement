@@ -9,20 +9,34 @@ export const DENTICON = {
   allocations: "denticon-payment-allocations",
 } as const;
 
-/** Denticon ledger types: C charge, P payment, A adjustment, M claim memo, I insurance note. */
+/**
+ * Denticon ledger types: C charge, P payment (patient or insurance), A
+ * adjustment, M claim memo, I insurance line — an insurance payment when it
+ * carries an amount ("PMT INS - EFT"), otherwise a note ("Insurance Denied").
+ */
 export type LedgerKind = "procedure" | "payment" | "adjustment" | "note";
+export type PaymentSource = "insurance" | "patient" | "other";
 
-export function ledgerKind(type: unknown): LedgerKind {
+export function ledgerKind(type: unknown, amount: number): LedgerKind {
   switch (type) {
     case "C":
       return "procedure";
     case "P":
       return "payment";
+    case "I":
+      return amount !== 0 ? "payment" : "note";
     case "A":
       return "adjustment";
     default:
       return "note";
   }
+}
+
+export function paymentSource(type: unknown, description: string): PaymentSource {
+  const d = description.toUpperCase();
+  if (type === "I" || d.includes("INS")) return "insurance";
+  if (d.includes("PAT") || d.includes("CASH") || d.includes("CARD") || d.includes("VISA") || d.includes("CHECK")) return "patient";
+  return "other";
 }
 
 export interface PatientSummary {
@@ -115,6 +129,8 @@ export interface LedgerLine {
   treatPlanId: string | null;
   estimatedInsurance: number | null;
   estimatedPatient: number | null;
+  /** Payments only: who paid. */
+  source?: PaymentSource;
   /** Procedures only: how much of this charge has been paid. */
   payment?: ProcedurePayment;
   /** Payments/adjustments only: how this money was applied. */
@@ -163,15 +179,18 @@ export function toLedgerLine(d: Document, providers: Record<string, string>): Le
   const s = (k: string) => (typeof t[k] === "string" && t[k] !== "" ? (t[k] as string) : null);
   const date = s("transactionDate") ?? s("createdOn") ?? new Date(0).toISOString();
   const providerId = s("providerId");
+  const amount = typeof t.amount === "number" ? t.amount : 0;
+  const description = s("description") ?? "";
+  const kind = ledgerKind(t.ledgerType, amount);
   return {
     id: String(t._id),
     ledgerId: s("ledgerId"),
-    kind: ledgerKind(t.ledgerType),
+    kind,
     date,
     dateOfService: date.slice(0, 10),
     code: s("procedureCode"),
-    description: s("description") ?? "",
-    amount: typeof t.amount === "number" ? t.amount : 0,
+    description,
+    amount,
     fee: typeof t.ucrFee === "number" ? t.ucrFee : null,
     tooth: s("tooth"),
     surface: s("surface"),
@@ -183,6 +202,7 @@ export function toLedgerLine(d: Document, providers: Record<string, string>): Le
     treatPlanId: s("treatPlanId"),
     estimatedInsurance: typeof t.estimatedInsurance === "number" ? t.estimatedInsurance : null,
     estimatedPatient: typeof t.estimatedPatient === "number" ? t.estimatedPatient : null,
+    source: kind === "payment" ? paymentSource(t.ledgerType, description) : undefined,
   };
 }
 
@@ -205,6 +225,8 @@ export function toAllocation(d: Document): Allocation {
  * using the allocation rows (paymentLedgerId → procedureLedgerId).
  */
 export function applyAllocations(lines: LedgerLine[], allocations: Allocation[]): void {
+  // Insurance is recognised by the allocation's claim id or by the paying line being an insurance payment.
+  const insuranceLedgerIds = new Set(lines.filter((l) => l.kind === "payment" && l.source === "insurance" && l.ledgerId).map((l) => l.ledgerId!));
   const byProcedure = new Map<string, Allocation[]>();
   const byPayment = new Map<string, Allocation[]>();
   for (const a of allocations) {
@@ -224,7 +246,7 @@ export function applyAllocations(lines: LedgerLine[], allocations: Allocation[])
       const abs = (n: number) => Math.abs(n);
       const paidAllocs = allocs.filter((a) => a.ledgerType !== "A");
       const paid = round2(paidAllocs.reduce((s, a) => s + abs(a.amount), 0));
-      const insurancePaid = round2(paidAllocs.filter((a) => a.claimId).reduce((s, a) => s + abs(a.amount), 0));
+      const insurancePaid = round2(paidAllocs.filter((a) => a.claimId || insuranceLedgerIds.has(a.paymentLedgerId)).reduce((s, a) => s + abs(a.amount), 0));
       const adjusted = round2(allocs.filter((a) => a.ledgerType === "A").reduce((s, a) => s + abs(a.amount), 0));
       const remaining = round2(Math.max(0, line.amount - paid - adjusted));
       const status: PaidStatus =

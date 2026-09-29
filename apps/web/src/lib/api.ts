@@ -153,6 +153,7 @@ export interface LedgerLine {
   treatPlanId: string | null;
   estimatedInsurance: number | null;
   estimatedPatient: number | null;
+  source?: "insurance" | "patient" | "other";
   payment?: ProcedurePayment;
   applied?: { total: number; unallocated: number; procedures: number };
 }

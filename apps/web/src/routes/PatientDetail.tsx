@@ -101,7 +101,11 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
           <Stat label="Paid in full" value={String(totals.paid)} sub="charge fully covered" tone="good" />
           <Stat label="Partially paid" value={String(totals.partial)} sub="some money applied" tone={totals.partial ? "warn" : undefined} />
           <Stat label="Unpaid" value={String(totals.unpaid)} sub="nothing applied yet" tone={totals.unpaid ? "bad" : undefined} />
-          <Stat label="Payments" value={money(totals.payments)} sub={`${payments.length} payment${payments.length === 1 ? "" : "s"}${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`} />
+          <Stat
+            label="Payments"
+            value={money(totals.payments)}
+            sub={`${money(payments.filter((p) => p.source === "insurance").reduce((s, p) => s - p.amount, 0))} insurance · ${money(payments.filter((p) => p.source !== "insurance").reduce((s, p) => s - p.amount, 0))} patient${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`}
+          />
           <Stat label="Balance" value={money(totals.balance)} sub={totals.adjustments ? `after ${money(Math.abs(totals.adjustments))} in adjustments` : totals.balance > 0 ? "outstanding" : "settled"} tone={totals.balance > 0 ? "bad" : undefined} />
         </div>
 
@@ -151,7 +155,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
                 <CardDescription>Every payment on the ledger, newest first.</CardDescription>
               </CardHeader>
               <CardContent>
-                <LedgerTable lines={payments} columns={["date", "description", "provider", "amount", "applied"]} emptyText="No payments recorded." />
+                <LedgerTable lines={payments} columns={["date", "description", "source", "provider", "amount", "applied"]} emptyText="No payments recorded." />
               </CardContent>
             </Card>
           </TabsContent>
@@ -209,7 +213,7 @@ function VisitCard({ visit }: { visit: Visit }) {
         )}
         {visit.payments.length > 0 && (
           <Section title="Payments">
-            <LedgerTable lines={visit.payments} columns={["description", "provider", "amount"]} />
+            <LedgerTable lines={visit.payments} columns={["description", "source", "provider", "amount"]} />
           </Section>
         )}
         {visit.adjustments.length > 0 && (
@@ -236,8 +240,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-type Col = "date" | "code" | "description" | "tooth" | "surface" | "provider" | "fee" | "amount" | "paid" | "remaining" | "status" | "applied";
-const COL_LABEL: Record<Col, string> = { date: "Date", code: "Code", description: "Description", tooth: "Tooth", surface: "Surface", provider: "Provider", fee: "Fee", amount: "Amount", paid: "Paid", remaining: "Remaining", status: "Status", applied: "Applied to" };
+type Col = "date" | "code" | "description" | "tooth" | "surface" | "provider" | "fee" | "amount" | "paid" | "remaining" | "status" | "applied" | "source";
+const COL_LABEL: Record<Col, string> = { date: "Date", code: "Code", description: "Description", tooth: "Tooth", surface: "Surface", provider: "Provider", fee: "Fee", amount: "Amount", paid: "Paid", remaining: "Remaining", status: "Status", applied: "Applied to", source: "Source" };
 const RIGHT: Col[] = ["fee", "amount", "paid", "remaining"];
 
 export function PaidBadge({ status }: { status: PaidStatus | undefined }) {
@@ -264,6 +268,7 @@ function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[
       }
       case "remaining": return l.payment ? money(l.payment.remaining) : "";
       case "status": return <PaidBadge status={l.payment?.status} />;
+      case "source": return l.source ? <Badge variant="outline" className="text-muted-foreground px-1.5">{l.source === "insurance" ? "Insurance" : l.source === "patient" ? "Patient" : "Other"}</Badge> : "";
       case "applied": return l.applied ? `${l.applied.procedures} procedure${l.applied.procedures === 1 ? "" : "s"}${l.applied.unallocated ? ` · ${money(l.applied.unallocated)} unapplied` : ""}` : "";
       case "date": return dateLabel(l.date);
       case "code": return l.code ?? "";
