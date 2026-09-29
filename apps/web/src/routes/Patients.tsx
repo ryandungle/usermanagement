@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SiteHeader } from "@/components/site-header";
 import { ColumnPicker } from "@/components/office/column-picker";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { rememberOffice, rememberState, rememberedState } from "@/lib/remembered";
 import { api, ApiError, type Office, type Pagination, type PatientSort, type PatientSummary } from "@/lib/api";
 import { ageFrom, dateLabel, fullName } from "@/lib/format";
 import { useMe } from "@/lib/me";
@@ -20,18 +21,11 @@ const stateKey = (officeId: string) => `um-patients-state:${officeId}`;
 
 /** Last list state (search, page, filter, sort) for an office, restored when the list is opened without params. */
 export function rememberedPatientsSearch(officeId: string): PatientsSearch {
-  try {
-    const raw = sessionStorage.getItem(stateKey(officeId));
-    return raw ? (JSON.parse(raw) as PatientsSearch) : {};
-  } catch {
-    return {};
-  }
+  return rememberedState<PatientsSearch>(stateKey(officeId));
 }
 
 function rememberPatientsSearch(officeId: string, search: PatientsSearch) {
-  try {
-    sessionStorage.setItem(stateKey(officeId), JSON.stringify(search));
-  } catch {}
+  rememberState(stateKey(officeId), search);
 }
 
 export interface PatientsSearch {
@@ -96,14 +90,12 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
 
   // Opened with no params (sidebar, back link): restore the last state for this office.
   const bare = !search.q && !search.page && !search.active && !search.sort && !search.order && !search.from && !search.to;
-  const [restored, setRestored] = useState(false);
+  const needsRestore = bare && Object.keys(rememberedPatientsSearch(officeId)).length > 0;
   useEffect(() => {
-    if (!bare) return setRestored(true);
-    const remembered = rememberedPatientsSearch(officeId);
-    if (Object.keys(remembered).length === 0) return setRestored(true);
-    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/patients", params: { officeId }, search: remembered, replace: true }), 0);
+    if (!needsRestore) return;
+    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/patients", params: { officeId }, search: rememberedPatientsSearch(officeId), replace: true }), 0);
     return () => window.clearTimeout(t);
-  }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [officeId, needsRestore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!bare)
@@ -137,9 +129,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   useEffect(() => {
     api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
     api.getConnector(officeId).then((r) => setLastVisitSupported(r.data?.capabilities.lastVisit ?? true)).catch(() => {});
-    try {
-      localStorage.setItem("um-clinical-office", officeId);
-    } catch {}
+    rememberOffice("patients", officeId);
   }, [officeId]);
 
   // Offices in the viewer's scope that have a database connector.
@@ -147,24 +137,35 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
     api.listOffices({}).then((r) => setOffices(r.data.filter((o) => o.hasConnector))).catch(() => setOffices([]));
   }, []);
 
+  // Only the latest request may update the table (a slow query for another office must not overwrite a newer one).
+  const requestSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    const current = () => seq === requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.listPatients(officeId, { q: q || undefined, active, page, pageSize: PAGE_SIZE, sort, order, dateField: from || to ? dateField : undefined, from, to });
+      if (!current()) return;
       setRows(res.data);
       setPagination(res.pagination);
     } catch (err) {
+      if (!current()) return;
       setError(err instanceof ApiError ? err.message : "Could not load patients");
       setRows([]);
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [officeId, q, active, page, sort, order, dateField, from, to]);
 
   useEffect(() => {
-    if (restored || !bare) void load();
-  }, [load, restored, bare]);
+    if (!needsRestore) void load();
+  }, [load, needsRestore]);
+
+  useEffect(() => {
+    setRows([]);
+    setPagination(null);
+  }, [officeId]);
 
   const go = (next: Partial<PatientsSearch>) =>
     navigate({

@@ -31,6 +31,7 @@ import { NavUser } from "@/components/nav-user";
 import { api, type Office } from "@/lib/api";
 import { rememberedPatientsSearch } from "@/routes/Patients";
 import { rememberedProceduresSearch } from "@/routes/Procedures";
+import { rememberedOffice, type ClinicalPage } from "@/lib/remembered";
 import { useMe } from "@/lib/me";
 
 type Tab = "users" | "clients" | "companies" | "offices";
@@ -44,16 +45,17 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const canManage = me?.permissions.canManageUsers ?? false;
   const level = me?.scope.level ?? "office";
 
-  // Offices with a database connector get a Patients entry (last used office wins).
+  // Offices with a database connector get Clinical entries; each page reopens the office it last showed.
   const [connected, setConnected] = React.useState<Office[]>([]);
-  const patientsOffice = React.useMemo(() => {
+  const officeFor = (page: ClinicalPage) => {
     if (connected.length === 0) return null;
-    let remembered: string | null = null;
-    try {
-      remembered = localStorage.getItem("um-clinical-office");
-    } catch {}
+    const remembered = rememberedOffice(page);
     return connected.find((o) => o.id === remembered) ?? connected[0]!;
-  }, [connected, pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const patientsOffice = React.useMemo(() => officeFor("patients"), [connected, pathname]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const proceduresOffice = React.useMemo(() => officeFor("procedures"), [connected, pathname]);
   React.useEffect(() => {
     if (!canManage) return setConnected([]);
     let cancelled = false;
@@ -172,9 +174,10 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild tooltip="Procedures" isActive={pathname.includes("/procedures")}>
-                    <Link to="/offices/$officeId/procedures" params={{ officeId: patientsOffice.id }} search={rememberedProceduresSearch(patientsOffice.id)}>
+                    <Link to="/offices/$officeId/procedures" params={{ officeId: (proceduresOffice ?? patientsOffice).id }} search={rememberedProceduresSearch((proceduresOffice ?? patientsOffice).id)}>
                       <StethoscopeIcon />
                       <span>Procedures</span>
+                      {connected.length > 1 && <span className="text-muted-foreground ml-auto truncate text-xs">{(proceduresOffice ?? patientsOffice).name}</span>}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

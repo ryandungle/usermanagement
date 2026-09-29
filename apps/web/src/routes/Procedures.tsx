@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, BuildingIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, LoaderIcon, SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SiteHeader } from "@/components/site-header";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { ColumnPicker } from "@/components/office/column-picker";
+import { rememberOffice, rememberState, rememberedState } from "@/lib/remembered";
 import { api, ApiError, type GroupSort, type Office, type Pagination, type ProcedureGroup, type ProcedureGroupBy, type ProcedureRow, type ProcedureSort } from "@/lib/api";
 import { dateLabel, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
@@ -33,17 +34,10 @@ const GROUP_LABEL: Record<ProcedureGroupBy, string> = { none: "No grouping", pat
 // ---- remembered state per office --------------------------------------------
 const stateKey = (officeId: string) => `um-procedures-state:${officeId}`;
 export function rememberedProceduresSearch(officeId: string): ProceduresSearch {
-  try {
-    const raw = sessionStorage.getItem(stateKey(officeId));
-    return raw ? (JSON.parse(raw) as ProceduresSearch) : {};
-  } catch {
-    return {};
-  }
+  return rememberedState<ProceduresSearch>(stateKey(officeId));
 }
 function rememberProceduresSearch(officeId: string, s: ProceduresSearch) {
-  try {
-    sessionStorage.setItem(stateKey(officeId), JSON.stringify(s));
-  } catch {}
+  rememberState(stateKey(officeId), s);
 }
 
 // ---- columns ------------------------------------------------------------------
@@ -127,17 +121,16 @@ export function ProceduresPage({ officeId, search }: { officeId: string; search:
   const sort = search.sort ?? defaultSort;
   const order = search.order ?? "desc";
 
-  // Restore the last state when opened without params (sidebar, back); remember otherwise.
+  // Restore the last state when opened without params (sidebar, back, office switch); remember otherwise.
+  // Derived, not stored in state, so switching office never loads defaults before the restore navigation lands.
   const bare = Object.values(search).every((v) => v === undefined);
-  const [restored, setRestored] = useState(false);
+  const needsRestore = bare && Object.keys(rememberedProceduresSearch(officeId)).length > 0;
   useEffect(() => {
-    if (!bare) return setRestored(true);
-    const remembered = rememberedProceduresSearch(officeId);
-    if (Object.keys(remembered).length === 0) return setRestored(true);
+    if (!needsRestore) return;
     // Defer so the navigation is not swallowed by the router transition that mounted this page.
-    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/procedures", params: { officeId }, search: remembered, replace: true }), 0);
+    const t = window.setTimeout(() => navigate({ to: "/offices/$officeId/procedures", params: { officeId }, search: rememberedProceduresSearch(officeId), replace: true }), 0);
     return () => window.clearTimeout(t);
-  }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [officeId, needsRestore]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!bare) rememberProceduresSearch(officeId, search);
   }, [officeId, bare, search]);
@@ -145,41 +138,53 @@ export function ProceduresPage({ officeId, search }: { officeId: string; search:
   useEffect(() => {
     api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
     api.listOffices({}).then((r) => setOffices(r.data.filter((o) => o.hasConnector))).catch(() => setOffices([]));
-    try {
-      localStorage.setItem("um-clinical-office", officeId);
-    } catch {}
+    rememberOffice("procedures", officeId);
   }, [officeId]);
 
+  // Only the latest request may update the table: a slow query for the previous office or filter must not overwrite a newer one.
+  const requestSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    const current = () => seq === requestSeq.current;
     setLoading(true);
     setError(null);
     try {
       const base = { from, to, q: q || undefined, providerId: providerId || undefined, nonZero: nonZero ? ("true" as const) : undefined, sort, order, page, pageSize: PAGE_SIZE };
       if (groupBy === "none") {
         const res = await api.listProcedures(officeId, { ...base, groupBy });
+        if (!current()) return;
         setRows(res.data);
         setGroups([]);
         setProviders(res.providers);
         setPagination(res.pagination);
       } else {
         const res = await api.groupProcedures(officeId, { ...base, groupBy });
+        if (!current()) return;
         setGroups(res.data);
         setRows([]);
         setProviders(res.providers);
         setPagination(res.pagination);
       }
     } catch (err) {
+      if (!current()) return;
       setError(err instanceof ApiError ? err.message : "Could not load procedures");
       setRows([]);
       setGroups([]);
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [officeId, groupBy, from, to, q, providerId, nonZero, sort, order, page]);
 
   useEffect(() => {
-    if (restored || !bare) void load();
-  }, [load, restored, bare]);
+    if (!needsRestore) void load();
+  }, [load, needsRestore]);
+
+  // Clear the previous office's rows the moment the office changes.
+  useEffect(() => {
+    setRows([]);
+    setGroups([]);
+    setPagination(null);
+  }, [officeId]);
 
   const go = (next: Partial<ProceduresSearch>) =>
     navigate({
