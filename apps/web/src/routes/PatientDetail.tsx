@@ -721,6 +721,13 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                           <TableCell className="text-right text-xs tabular-nums">{p.writeOff ? money(p.writeOff) : ""}</TableCell>
                                         </TableRow>
                                       ))}
+                                      <TableRow className="bg-muted/50 font-medium">
+                                        <TableCell colSpan={3} className="text-xs">Total across {c.procedures.length} procedure{c.procedures.length === 1 ? "" : "s"}</TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.feeBilled)))}</TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.estimate ?? 0)))}</TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.insurancePaid)))}</TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">{sum(c.procedures.map((p) => p.writeOff)) ? money(sum(c.procedures.map((p) => p.writeOff))) : ""}</TableCell>
+                                      </TableRow>
                                     </TableBody>
                                   </Table>
                                 )}
@@ -735,6 +742,11 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                     <span className="tabular-nums">{money(p.amount)}</span>
                                   </div>
                                 ))}
+                                {c.payments.length > 0 && (
+                                  <div className="text-muted-foreground mt-1 text-xs">
+                                    {money(sum(c.payments.map((p) => p.amount)))} received, split across the procedures at left as the carrier's explanation of benefits lists them.
+                                  </div>
+                                )}
                                 {c.deductible > 0 && <div className="text-muted-foreground text-xs">{money(c.deductible)} applied to deductible.</div>}
                               </div>
                             </div>
