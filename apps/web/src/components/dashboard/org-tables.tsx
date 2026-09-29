@@ -21,6 +21,8 @@ interface Config<T extends Entity> {
   list: () => Promise<{ data: T[] }>;
   /** Create with the chosen parent id (empty string when the entity has no parent). */
   create?: (name: string, parentId: string) => Promise<unknown>;
+  /** Extra row actions (label + handler). */
+  extra?: { label: string; onClick: (t: T) => void }[];
   /** Fixed parent id when the table is already filtered; otherwise the dialog asks. */
   parentId?: string;
   /** Parent picker shown in the create dialog when parentId is not fixed. */
@@ -137,6 +139,7 @@ function EntityTable<T extends Entity>({ cfg, onChanged }: { cfg: Config<T>; onC
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                           {cfg.open && <DropdownMenuItem onClick={() => cfg.open!(t)}>{cfg.openLabel ?? "Open"}</DropdownMenuItem>}
+                          {cfg.extra?.map((x) => <DropdownMenuItem key={x.label} onClick={() => x.onClick(t)}>{x.label}</DropdownMenuItem>)}
                           {cfg.rename && <DropdownMenuItem onClick={() => { setName(t.name); setDialog({ kind: "rename", item: t }); }}>Rename</DropdownMenuItem>}
                           {cfg.remove && (
                             <>
@@ -241,8 +244,9 @@ export function OfficesTable({ me, clientId, companyId, onChanged }: { me: Me; c
     parent: { label: "Company", options: () => api.listCompanies(clientId).then((r) => r.data.map((c) => ({ id: c.id, name: c.clientName ? `${c.clientName} › ${c.name}` : c.name }))) },
     rename: me.permissions.canManageUsers ? (o, n) => api.renameOffice(o.id, n) : undefined,
     remove: me.permissions.canCreateOffices ? (o) => api.deleteOffice(o.id) : undefined,
-    open: me.permissions.canManageUsers ? (o) => navigate({ to: "/", search: { tab: "users", officeId: o.id } }) : undefined,
-    openLabel: "View users",
+    open: me.permissions.canManageUsers ? (o) => navigate({ to: "/offices/$officeId", params: { officeId: o.id } }) : undefined,
+    openLabel: "Open office",
+    extra: me.permissions.canManageUsers ? [{ label: "View users", onClick: (o) => navigate({ to: "/", search: { tab: "users", officeId: o.id } }) }] : undefined,
   };
   return <EntityTable cfg={cfg} onChanged={onChanged} />;
 }

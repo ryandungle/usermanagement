@@ -15,6 +15,13 @@
       "when": 1790659874798,
       "tag": "0001_user_offices",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790698145374,
+      "tag": "0002_office_connector",
+      "breakpoints": true
     }
   ]
 }

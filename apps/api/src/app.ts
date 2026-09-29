@@ -9,6 +9,7 @@ import { clientsRoute } from "./routes/clients.js";
 import { companiesRoute } from "./routes/companies.js";
 import { meRoute } from "./routes/me.js";
 import { officesRoute } from "./routes/offices.js";
+import { connectorRoute } from "./routes/connector.js";
 import { statsRoute } from "./routes/stats.js";
 import { usersRoute } from "./routes/users.js";
 
@@ -42,6 +43,7 @@ export const app = new Hono<AppEnv>()
   .route("/api/clients", clientsRoute)
   .route("/api/companies", companiesRoute)
   .route("/api/offices", officesRoute)
+  .route("/api/offices", connectorRoute)
   .route("/api/users", usersRoute)
   .route("/api/stats", statsRoute)
 

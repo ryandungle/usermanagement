@@ -129,6 +129,26 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroup>
         )}
 
+        {me && me.scope.level === "office" && me.permissions.canManageUsers && me.scope.offices.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>My offices</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {me.scope.offices.map((o) => (
+                  <SidebarMenuItem key={o.id}>
+                    <SidebarMenuButton asChild tooltip={o.name} isActive={pathname === `/offices/${o.id}`}>
+                      <Link to="/offices/$officeId" params={{ officeId: o.id }}>
+                        <BuildingIcon />
+                        <span>{o.name}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>

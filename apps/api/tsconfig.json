@@ -3,11 +3,18 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "@cloudflare/workers-types",
+      "node"
+    ],
     "noEmit": true,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

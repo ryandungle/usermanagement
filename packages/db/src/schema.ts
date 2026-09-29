@@ -74,6 +74,28 @@ export const user = pgTable(
   ],
 );
 
+/**
+ * External database hooked up to an office (its clinic/practice system).
+ * The connection string is encrypted with a key derived from BETTER_AUTH_SECRET;
+ * only host/database are stored in the clear for display.
+ */
+export const officeConnector = pgTable("office_connector", {
+  officeId: text("office_id")
+    .primaryKey()
+    .references(() => office.id, { onDelete: "cascade" }),
+  type: text("type").notNull().default("mongodb"),
+  urlEncrypted: text("url_encrypted").notNull(),
+  host: text("host").notNull(),
+  database: text("database").notNull(),
+  /** JSON array of collection names seen on the last successful test. */
+  collections: text("collections").notNull().default("[]"),
+  status: text("status").notNull().default("unknown"),
+  lastError: text("last_error"),
+  lastTestedAt: timestamp("last_tested_at"),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
 /** Many-to-many: which offices a user (or office manager) belongs to. */
 export const userOffice = pgTable(
   "user_office",
@@ -140,11 +162,12 @@ export const verification = pgTable(
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
-export const schema = { client, company, office, user, userOffice, session, account, verification };
+export const schema = { client, company, office, officeConnector, user, userOffice, session, account, verification };
 
 export type Client = typeof client.$inferSelect;
 export type Company = typeof company.$inferSelect;
 export type Office = typeof office.$inferSelect;
+export type OfficeConnector = typeof officeConnector.$inferSelect;
 export type User = typeof user.$inferSelect;
 export type UserOffice = typeof userOffice.$inferSelect;
 export type NewUser = typeof user.$inferInsert;

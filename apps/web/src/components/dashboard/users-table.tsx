@@ -13,6 +13,7 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { ROLE_LABEL, canManageUser, type Role } from "@usermanagement/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -243,7 +244,22 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
                         <Badge variant="outline" className="text-muted-foreground px-1.5">{ROLE_LABEL[u.role]}</Badge>
                       </TableCell>
                     )}
-                    {visible.has("scope") && <TableCell className="text-muted-foreground">{scopeText(u)}</TableCell>}
+                    {visible.has("scope") && (
+                      <TableCell className="text-muted-foreground">
+                        {[u.clientName, u.companyName].filter(Boolean).join(" › ") || "Global"}
+                        {u.offices.length > 0 && (
+                          <>
+                            {" › "}
+                            {u.offices.map((o, i) => (
+                              <span key={o.id}>
+                                {i > 0 && ", "}
+                                <Link to="/offices/$officeId" params={{ officeId: o.id }} className="hover:text-foreground underline-offset-4 hover:underline">{o.name}</Link>
+                              </span>
+                            ))}
+                          </>
+                        )}
+                      </TableCell>
+                    )}
                     {visible.has("status") && (
                       <TableCell>
                         {u.banned ? (
@@ -363,7 +379,3 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
   );
 }
 
-function scopeText(u: ManagedUser) {
-  const parts = [u.clientName, u.companyName, u.offices.map((o) => o.name).join(", ") || null].filter(Boolean);
-  return parts.length ? parts.join(" › ") : "Global";
-}

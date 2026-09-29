@@ -66,6 +66,28 @@ export interface Overview {
   series: { date: string; newUsers: number; signIns: number }[];
 }
 
+export interface OfficeConnector {
+  type: "mongodb";
+  host: string;
+  database: string;
+  collections: string[];
+  status: "ok" | "error" | "unknown";
+  lastError: string | null;
+  lastTestedAt: string | null;
+  updatedAt: string;
+}
+
+export interface CollectionInfo {
+  name: string;
+  count: number | null;
+}
+
+export interface DocsPage {
+  data: Record<string, unknown>[];
+  fields: string[];
+  pagination: Pagination;
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -155,6 +177,16 @@ export const api = {
     request<{ data: Office }>("/api/offices", json("POST", { companyId, name })),
   renameOffice: (id: string, name: string) => request<{ data: Office }>(`/api/offices/${id}`, json("PATCH", { name })),
   deleteOffice: (id: string) => request<{ data: { success: boolean } }>(`/api/offices/${id}`, json("DELETE")),
+
+  // office connector + data browsing
+  getConnector: (officeId: string) => request<{ data: OfficeConnector | null }>(`/api/offices/${officeId}/connector`),
+  saveConnector: (officeId: string, data: { type: "mongodb"; url: string; database?: string }) =>
+    request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector`, json("PUT", data)),
+  testConnector: (officeId: string) => request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector/test`, json("POST")),
+  deleteConnector: (officeId: string) => request<{ data: { success: boolean } }>(`/api/offices/${officeId}/connector`, json("DELETE")),
+  listCollections: (officeId: string) => request<{ data: CollectionInfo[] }>(`/api/offices/${officeId}/data/collections`),
+  listDocuments: (officeId: string, collection: string, params: { q?: string; page?: number; pageSize?: number }) =>
+    request<DocsPage>(`/api/offices/${officeId}/data/${encodeURIComponent(collection)}${qs({ ...params })}`),
 
   // users
   listUsers: (params: ListUsersParams) =>

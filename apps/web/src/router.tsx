@@ -1,8 +1,10 @@
 import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
+import { hasRank, isRole } from "@usermanagement/shared";
 import { authClient } from "./lib/auth-client";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./routes/Login";
 import { SettingsPage } from "./routes/Settings";
+import { OfficeDetailPage } from "./routes/OfficeDetail";
 import { DashboardPage, type DashboardSearch, type Tab } from "./routes/Dashboard";
 
 async function currentUser() {
@@ -43,6 +45,20 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const officeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/offices/$officeId",
+  beforeLoad: async () => {
+    const user = await currentUser();
+    if (!user) throw redirect({ to: "/login" });
+    if (!isRole(user.role) || !hasRank({ role: user.role }, "office_manager")) throw redirect({ to: "/" });
+  },
+  component: function OfficeRoute() {
+    const { officeId } = officeRoute.useParams();
+    return <OfficeDetailPage officeId={officeId} />;
+  },
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -52,7 +68,7 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, settingsRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, officeRoute, settingsRoute, loginRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 
