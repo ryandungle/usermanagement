@@ -5,6 +5,8 @@ import { Layout } from "./components/Layout";
 import { LoginPage } from "./routes/Login";
 import { SettingsPage } from "./routes/Settings";
 import { OfficeDetailPage } from "./routes/OfficeDetail";
+import { PatientsPage, type PatientsSearch } from "./routes/Patients";
+import { PatientDetailPage } from "./routes/PatientDetail";
 import { DashboardPage, type DashboardSearch, type Tab } from "./routes/Dashboard";
 
 async function currentUser() {
@@ -59,6 +61,38 @@ const officeRoute = createRoute({
   },
 });
 
+const managerGuard = async () => {
+  const user = await currentUser();
+  if (!user) throw redirect({ to: "/login" });
+  if (!isRole(user.role) || !hasRank({ role: user.role }, "office_manager")) throw redirect({ to: "/" });
+};
+
+const patientsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/offices/$officeId/patients",
+  validateSearch: (s: Record<string, unknown>): PatientsSearch => ({
+    q: typeof s.q === "string" && s.q ? s.q : undefined,
+    page: typeof s.page === "number" && s.page > 1 ? s.page : undefined,
+    active: s.active === "false" ? "false" : undefined,
+  }),
+  beforeLoad: managerGuard,
+  component: function PatientsRoute() {
+    const { officeId } = patientsRoute.useParams();
+    const search = patientsRoute.useSearch();
+    return <PatientsPage officeId={officeId} search={search} />;
+  },
+});
+
+const patientRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/offices/$officeId/patients/$patientId",
+  beforeLoad: managerGuard,
+  component: function PatientRoute() {
+    const { officeId, patientId } = patientRoute.useParams();
+    return <PatientDetailPage officeId={officeId} patientId={patientId} />;
+  },
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -68,7 +102,7 @@ const loginRoute = createRoute({
   component: LoginPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, officeRoute, settingsRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, officeRoute, patientsRoute, patientRoute, settingsRoute, loginRoute]);
 
 export const router = createRouter({ routeTree, defaultPreload: "intent" });
 

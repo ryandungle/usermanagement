@@ -88,6 +88,105 @@ export interface DocsPage {
   pagination: Pagination;
 }
 
+export interface PatientSummary {
+  id: string;
+  patientId: string;
+  firstName: string;
+  lastName: string;
+  birthDate: string | null;
+  sex: string | null;
+  cellPhone: string | null;
+  homePhone: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  active: boolean;
+  lastVisitDate: string | null;
+  preferredProviderId: string | null;
+}
+
+export type LedgerKind = "procedure" | "payment" | "adjustment" | "note";
+
+export type PaidStatus = "paid" | "partial" | "unpaid" | "none";
+
+export interface Allocation {
+  id: string;
+  paymentLedgerId: string;
+  procedureLedgerId: string | null;
+  amount: number;
+  ledgerType: string | null;
+  claimId: string | null;
+  date: string;
+}
+
+export interface ProcedurePayment {
+  paid: number;
+  insurancePaid: number;
+  patientPaid: number;
+  adjusted: number;
+  remaining: number;
+  status: PaidStatus;
+  allocations: Allocation[];
+}
+
+export interface LedgerLine {
+  id: string;
+  ledgerId: string | null;
+  kind: LedgerKind;
+  date: string;
+  dateOfService: string;
+  code: string | null;
+  description: string;
+  amount: number;
+  fee: number | null;
+  tooth: string | null;
+  surface: string | null;
+  providerId: string | null;
+  provider: string | null;
+  ledgerType: string | null;
+  ledgerType2: string | null;
+  claimId: string | null;
+  treatPlanId: string | null;
+  estimatedInsurance: number | null;
+  estimatedPatient: number | null;
+  payment?: ProcedurePayment;
+  applied?: { total: number; unallocated: number; procedures: number };
+}
+
+export interface Visit {
+  dateOfService: string;
+  providers: string[];
+  procedures: LedgerLine[];
+  payments: LedgerLine[];
+  adjustments: LedgerLine[];
+  notes: LedgerLine[];
+  charges: number;
+  paid: number;
+  adjusted: number;
+}
+
+export interface PatientDetail {
+  patient: Record<string, unknown>;
+  summary: PatientSummary;
+  totals: {
+    charges: number;
+    payments: number;
+    adjustments: number;
+    balance: number;
+    visits: number;
+    procedures: number;
+    paid: number;
+    partial: number;
+    unpaid: number;
+    unallocatedPayments: number;
+  };
+  treatments: LedgerLine[];
+  visits: Visit[];
+  payments: LedgerLine[];
+  providers: Record<string, string>;
+  transactionCount: number;
+}
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -187,6 +286,12 @@ export const api = {
   listCollections: (officeId: string) => request<{ data: CollectionInfo[] }>(`/api/offices/${officeId}/data/collections`),
   listDocuments: (officeId: string, collection: string, params: { q?: string; page?: number; pageSize?: number }) =>
     request<DocsPage>(`/api/offices/${officeId}/data/${encodeURIComponent(collection)}${qs({ ...params })}`),
+
+  // patients (Denticon collections through the office connector)
+  listPatients: (officeId: string, params: { q?: string; active?: "true" | "false"; page?: number; pageSize?: number }) =>
+    request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
+  getPatient: (officeId: string, patientId: string) =>
+    request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),
 
   // users
   listUsers: (params: ListUsersParams) =>

@@ -2,6 +2,18 @@ import { DurableObject } from "cloudflare:workers";
 import { MongoClient, type Document } from "mongodb";
 import { decryptSecret } from "../lib/crypto.js";
 import { inferFields, isSafeCollectionName, orderCollections, toPlain } from "../lib/mongo.js";
+import {
+  DENTICON,
+  PATIENT_PROJECTION,
+  applyAllocations,
+  groupVisits,
+  providerName,
+  toAllocation,
+  toLedgerLine,
+  toPatientSummary,
+  type PatientDetail,
+  type PatientSummary,
+} from "../lib/denticon.js";
 
 /** Close the pool after this long without a request. */
 const IDLE_MS = 10 * 60 * 1000;
@@ -128,6 +140,83 @@ export class MongoPool extends DurableObject<PoolEnv> {
         query.page === 1 ? coll.find({}, { limit: 200 }).sort({ _id: -1 }).toArray() : Promise.resolve([] as Document[]),
       ]);
       return { docs: docs.map((d) => toPlain(d) as Record<string, unknown>), fields: inferFields([...docs, ...sample]), total };
+    });
+  }
+
+  // ---- Denticon patient pages ----
+
+  /** Search patients by name, id, phone or email. Every word must match some field. */
+  async listPatients(
+    urlEncrypted: string,
+    database: string,
+    query: { q?: string; page: number; pageSize: number; activeOnly?: boolean },
+  ): Promise<{ patients: PatientSummary[]; total: number }> {
+    return this.withClient(urlEncrypted, async (client) => {
+      const coll = client.db(database).collection(DENTICON.patients);
+      const words = (query.q ?? "").split(/\s+/).filter(Boolean).slice(0, 5);
+      const and: Document[] = [];
+      if (query.activeOnly) and.push({ active: { $ne: false } });
+      for (const w of words) {
+        const rx = { $regex: w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+        and.push({ $or: [{ firstName: rx }, { lastName: rx }, { nickname: rx }, { patientId: rx }, { cellPhone: rx }, { homePhone: rx }, { email: rx }, { chartNo: rx }] });
+      }
+      const filter: Document = and.length ? { $and: and } : {};
+      const [docs, total] = await Promise.all([
+        coll
+          .find(filter, { projection: PATIENT_PROJECTION })
+          .sort({ lastName: 1, firstName: 1 })
+          .skip((query.page - 1) * query.pageSize)
+          .limit(query.pageSize)
+          .toArray(),
+        coll.countDocuments(filter, { limit: 100_000 }),
+      ]);
+      return { patients: docs.map(toPatientSummary), total };
+    });
+  }
+
+  /** One patient with their ledger grouped into visits by date of service. */
+  async getPatient(urlEncrypted: string, database: string, patientId: string): Promise<PatientDetail | null> {
+    return this.withClient(urlEncrypted, async (client) => {
+      const db = client.db(database);
+      const patient = await db.collection(DENTICON.patients).findOne({ patientId }, { projection: PATIENT_PROJECTION });
+      if (!patient) return null;
+      const [txns, providerDocs, allocationDocs] = await Promise.all([
+        db.collection(DENTICON.transactions).find({ patientId }).sort({ transactionDate: -1, createdOn: -1 }).limit(5000).toArray(),
+        db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
+        db.collection(DENTICON.allocations).find({ patientId }).limit(10000).toArray().catch(() => [] as Document[]),
+      ]);
+      const providers = Object.fromEntries(providerDocs.map(providerName));
+      const lines = txns.map((t) => toLedgerLine(t, providers));
+      applyAllocations(lines, allocationDocs.map(toAllocation));
+      const visits = groupVisits(lines);
+      const sum = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100;
+      const treatments = lines.filter((l) => l.kind === "procedure");
+      const paymentLines = lines.filter((l) => l.kind === "payment");
+      const charges = sum(treatments.map((l) => l.amount));
+      const payments = sum(paymentLines.map((l) => -l.amount));
+      const adjustments = sum(lines.filter((l) => l.kind === "adjustment").map((l) => l.amount));
+      const count = (status: string) => treatments.filter((l) => l.payment?.status === status).length;
+      return {
+        patient: toPlain(patient) as Record<string, unknown>,
+        summary: toPatientSummary(patient),
+        totals: {
+          charges,
+          payments,
+          adjustments,
+          balance: Math.round((charges + adjustments - payments) * 100) / 100,
+          visits: visits.filter((v) => v.procedures.length > 0).length,
+          procedures: treatments.length,
+          paid: count("paid"),
+          partial: count("partial"),
+          unpaid: count("unpaid"),
+          unallocatedPayments: sum(paymentLines.map((l) => l.applied?.unallocated ?? 0)),
+        },
+        treatments,
+        visits,
+        payments: lines.filter((l) => l.kind === "payment"),
+        providers,
+        transactionCount: lines.length,
+      };
     });
   }
 
