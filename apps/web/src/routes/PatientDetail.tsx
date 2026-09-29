@@ -670,7 +670,7 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
                           <TableCell />
                           <TableCell colSpan={10} className="py-3">
-                            <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+                            <div className="grid gap-4">
                               <div className="grid gap-1.5">
                                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Procedures on this claim</div>
                                 {c.procedures.length === 0 ? <div className="text-muted-foreground text-sm">No procedure lines in the export.</div> : (
@@ -709,7 +709,7 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                   </Table>
                                 )}
                               </div>
-                              <div className="grid content-start gap-1.5">
+                              <div className="grid content-start gap-1.5 md:max-w-xl">
                                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Payments received</div>
                                 {c.payments.length === 0 ? (
                                   <div className="text-muted-foreground text-sm">{c.status === "sent" ? "Nothing received yet." : c.status === "unsent" ? "Claim has not been sent." : "No insurance payment recorded."}</div>
