@@ -228,6 +228,108 @@ function applyInsurance(lines: LedgerLine[], claimProcs: Document[], paymentDesc
   }
 }
 
+// ---------------------------------------------------------------------------
+// Patient portion: the export has no paysplit rows, so patient payments are
+// applied to the oldest outstanding patient portions first, which is how Open
+// Dental itself splits a payment when nobody allocates it by hand.
+// ---------------------------------------------------------------------------
+
+interface FifoProc { key: string; date: string; portion: number }
+interface FifoPay { key: string; date: string; amount: number }
+interface FifoLink { procKey: string; payKey: string; amount: number }
+
+/** Greedy oldest-first allocation of net patient payments to patient portions. Refunds eat the most recent capacity first. */
+function fifoAllocate(procs: FifoProc[], pays: FifoPay[]): { links: FifoLink[]; byProc: Map<string, number>; byPay: Map<string, number>; refunded: Map<string, number>; credit: number; paid: number } {
+  const ordered = [...pays].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.key < b.key ? -1 : 1));
+  const pool = ordered.filter((p) => p.amount > 0).map((p) => ({ ...p, left: round2(p.amount) }));
+  const refunded = new Map<string, number>();
+  for (const r of ordered.filter((p) => p.amount < 0)) {
+    let need = round2(-r.amount);
+    const eligible = [...pool.filter((p) => p.date <= r.date).reverse(), ...pool.filter((p) => p.date > r.date)];
+    for (const p of eligible) {
+      if (need <= 0.005) break;
+      const take = round2(Math.min(p.left, need));
+      p.left = round2(p.left - take);
+      need = round2(need - take);
+      refunded.set(p.key, round2((refunded.get(p.key) ?? 0) + take));
+    }
+  }
+  const links: FifoLink[] = [];
+  const byProc = new Map<string, number>();
+  const byPay = new Map<string, number>();
+  let i = 0;
+  for (const proc of [...procs].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.key < b.key ? -1 : 1))) {
+    let need = round2(proc.portion);
+    while (need > 0.005 && i < pool.length) {
+      const p = pool[i]!;
+      if (p.left <= 0.005) { i++; continue; }
+      const take = round2(Math.min(p.left, need));
+      p.left = round2(p.left - take);
+      need = round2(need - take);
+      links.push({ procKey: proc.key, payKey: p.key, amount: take });
+      byProc.set(proc.key, round2((byProc.get(proc.key) ?? 0) + take));
+      byPay.set(p.key, round2((byPay.get(p.key) ?? 0) + take));
+    }
+  }
+  const credit = round2(pool.reduce((a, p) => a + p.left, 0));
+  const paid = round2(pays.reduce((a, p) => a + p.amount, 0));
+  return { links, byProc, byPay, refunded, credit, paid };
+}
+
+/** Patient-portion allocation for many patients at once (office-wide procedure pages). */
+async function patientPortionByProc(db: Db, m: PmsMapping, patNums: string[]): Promise<Map<string, number>> {
+  const ids = [...new Set(patNums)].filter(Boolean).slice(0, 500);
+  if (ids.length === 0) return new Map();
+  const PAY_EXPR = { $convert: { input: "$PayAmt", to: "double", onError: 0, onNull: 0 } };
+  const [procs, cps, pays] = await Promise.all([
+    db.collection(m.procedureLogs!).aggregate([
+      { $match: { PatNum: { $in: ids }, ProcStatus: PROC_COMPLETE } },
+      { $project: { PatNum: 1, ProcNum: 1, ProcDate: 1, fee: FEE_EXPR } },
+      { $limit: 100_000 },
+    ], { allowDiskUse: true }).toArray(),
+    m.claimProcs ? db.collection(m.claimProcs).aggregate([
+      { $match: { PatNum: { $in: ids }, Status: { $in: [...CLAIMPROC_PAID] } } },
+      { $group: { _id: "$ProcNum", ins: { $sum: { $convert: { input: "$InsPayAmt", to: "double", onError: 0, onNull: 0 } } }, wo: { $sum: { $convert: { input: "$WriteOff", to: "double", onError: 0, onNull: 0 } } } } },
+    ], { allowDiskUse: true }).toArray().catch(() => [] as Document[]) : Promise.resolve([] as Document[]),
+    db.collection(m.payments!).aggregate([
+      { $match: { PatNum: { $in: ids } } },
+      { $project: { PatNum: 1, PayNum: 1, PayDate: 1, amount: PAY_EXPR } },
+    ]).toArray().catch(() => [] as Document[]),
+  ]);
+  const insByProc = new Map(cps.map((c) => [String(c._id), { ins: num(c.ins), wo: num(c.wo) }]));
+  const procsByPat = new Map<string, FifoProc[]>();
+  for (const d of procs) {
+    const e = insByProc.get(String(d.ProcNum));
+    const portion = Math.max(0, num(d.fee) - (e?.ins ?? 0) - (e?.wo ?? 0));
+    const list = procsByPat.get(String(d.PatNum)) ?? [];
+    list.push({ key: String(d.ProcNum), date: iso(d.ProcDate) ?? "", portion });
+    procsByPat.set(String(d.PatNum), list);
+  }
+  const paysByPat = new Map<string, FifoPay[]>();
+  for (const d of pays) {
+    const list = paysByPat.get(String(d.PatNum)) ?? [];
+    list.push({ key: String(d.PayNum), date: iso(d.PayDate) ?? "", amount: num(d.amount) });
+    paysByPat.set(String(d.PatNum), list);
+  }
+  const out = new Map<string, number>();
+  for (const [pat, list] of procsByPat) {
+    const { byProc } = fifoAllocate(list, paysByPat.get(pat) ?? []);
+    for (const [k, v] of byProc) out.set(k, v);
+  }
+  return out;
+}
+
+/** Fold an allocated patient portion into a procedure line's payment summary. */
+function addPatientPaid(line: LedgerLine, amount: number, links: AllocationLink[] = []): void {
+  const p = line.payment;
+  if (!p || amount <= 0) return;
+  p.patientPaid = round2(p.patientPaid + amount);
+  p.paid = round2(p.paid + amount);
+  p.remaining = round2(Math.max(0, line.amount - p.paid - p.adjusted));
+  p.status = line.amount <= 0 ? "none" : p.remaining <= 0.005 ? "paid" : p.paid + p.adjusted > 0 ? "partial" : "unpaid";
+  p.allocations.push(...links);
+}
+
 export const opendentalAdapter: PmsAdapter = {
   async listPatients(db, m, query) {
     const coll = db.collection(m.patients!);
@@ -351,6 +453,37 @@ export const opendentalAdapter: PmsAdapter = {
     }
     applyInsurance(lines, claimProcs, payDesc);
 
+    // Patient payments -> oldest outstanding patient portions first, with links both ways.
+    const procLines = lines.filter((l) => l.kind === "procedure" && l.ledgerId);
+    const patPayLines = lines.filter((l) => l.kind === "payment" && l.source === "patient" && l.ledgerId);
+    const fifo = fifoAllocate(
+      procLines.map((l) => ({ key: l.ledgerId!, date: l.date, portion: Math.max(0, l.amount - (l.payment?.paid ?? 0) - (l.payment?.adjusted ?? 0)) })),
+      patPayLines.map((l) => ({ key: l.ledgerId!, date: l.date, amount: -l.amount })),
+    );
+    const procByKey = new Map(procLines.map((l) => [l.ledgerId!, l]));
+    const payByKey = new Map(patPayLines.map((l) => [l.ledgerId!, l]));
+    const linksByProc = new Map<string, AllocationLink[]>();
+    const linksByPay = new Map<string, AllocationLink[]>();
+    for (const [n, fl] of fifo.links.entries()) {
+      const proc = procByKey.get(fl.procKey)!;
+      const pay = payByKey.get(fl.payKey)!;
+      const base: Allocation = { id: `fifo:${n}`, paymentAllocationId: null, paymentLedgerId: fl.payKey, procedureLedgerId: fl.procKey, amount: fl.amount, ledgerType: "P", claimId: null, date: pay.date };
+      linksByProc.set(fl.procKey, [...(linksByProc.get(fl.procKey) ?? []), { ...base, linkedLedgerId: fl.payKey, linkedDescription: pay.description, linkedCode: null, linkedDate: pay.date, linkedKind: "payment", linkedSource: "patient" }]);
+      linksByPay.set(fl.payKey, [...(linksByPay.get(fl.payKey) ?? []), { ...base, linkedLedgerId: fl.procKey, linkedDescription: proc.description, linkedCode: proc.code, linkedDate: proc.date, linkedKind: "procedure", linkedSource: null }]);
+    }
+    for (const [k, amount] of fifo.byProc) addPatientPaid(procByKey.get(k)!, amount, linksByProc.get(k));
+    for (const pay of patPayLines) {
+      const amount = -pay.amount;
+      if (amount <= 0) continue;
+      const items = linksByPay.get(pay.ledgerId!) ?? [];
+      const total = round2(fifo.byPay.get(pay.ledgerId!) ?? 0);
+      const refunded = round2(fifo.refunded.get(pay.ledgerId!) ?? 0);
+      if (refunded > 0) pay.description += ` · ${refunded.toFixed(2)} refunded`;
+      pay.applied = { total, unallocated: round2(Math.max(0, amount - total - refunded)), procedures: new Set(items.map((i) => i.procedureLedgerId)).size, items };
+    }
+    const guarantor = str(patient.Guarantor);
+    const pmsBalance = typeof patient.BalTotal === "number" ? patient.BalTotal : num(patient.BalTotal) || null;
+
     const treatments = lines.filter((l) => l.kind === "procedure");
     const paymentLines = lines.filter((l) => l.kind === "payment").sort((a, b) => (a.date < b.date ? 1 : -1));
     const sum = (xs: number[]) => round2(xs.reduce((a, b) => a + b, 0));
@@ -365,17 +498,20 @@ export const opendentalAdapter: PmsAdapter = {
     return {
       patient: toPlain(patient) as Record<string, unknown>,
       summary: s,
-      totals: { charges, payments, adjustments, balance: round2(charges + adjustments - payments), visits: visits.filter((v) => v.procedures.length > 0).length, procedures: treatments.length, paid: count("paid"), partial: count("partial"), unpaid: count("unpaid"), unallocatedPayments: 0 },
+      totals: { charges, payments, adjustments, balance: round2(charges + adjustments - payments), visits: visits.filter((v) => v.procedures.length > 0).length, procedures: treatments.length, paid: count("paid"), partial: count("partial"), unpaid: count("unpaid"), unallocatedPayments: fifo.credit },
       treatments,
       visits,
       payments: paymentLines,
       providers,
       transactionCount: lines.length,
       notes: [
-        "Open Dental export: paid status reflects insurance payments and write-offs per procedure. Patient payments are recorded at account level (no paysplit rows), so they count toward the balance but are not tied to individual procedures.",
+        "Open Dental export: insurance payments and write-offs come from claim procs. The export has no paysplit rows, so patient payments are applied here to the oldest outstanding patient portion first (Open Dental's default split); the actual split in Open Dental may differ.",
+        ...(pmsBalance !== null && Math.abs(round2(charges + adjustments - payments) - pmsBalance) > 0.005
+          ? [`Open Dental reports a balance of ${pmsBalance.toFixed(2)} for this patient${guarantor && guarantor !== patientId ? ` (guarantor is patient ${guarantor})` : ""}. The difference from the balance computed here is money Open Dental split to other family members or accounts, which this export does not show.`]
+          : []),
       ],
       allocationSource: m.claimProcs ?? undefined,
-      pmsBalance: typeof patient.BalTotal === "number" ? patient.BalTotal : num(patient.BalTotal) || null,
+      pmsBalance,
     };
   },
 
@@ -401,6 +537,11 @@ export const opendentalAdapter: PmsAdapter = {
     ]);
     const lines = docs.map((d) => procLine(d, codes, providers));
     applyInsurance(lines, claimProcs, (cp) => `Insurance payment · claim ${cp.ClaimNum}`);
+    const patientPaid = await patientPortionByProc(db, m, docs.map((d) => String(d.PatNum)));
+    for (const l of lines) {
+      const amt = l.ledgerId ? patientPaid.get(l.ledgerId) ?? 0 : 0;
+      if (amt > 0) addPatientPaid(l, amt, [{ id: `fifo:${l.ledgerId}`, paymentAllocationId: null, paymentLedgerId: "patient-payments", procedureLedgerId: l.ledgerId, amount: amt, ledgerType: "P", claimId: null, date: l.date, linkedLedgerId: null, linkedDescription: "Patient payments (applied oldest-first)", linkedCode: null, linkedDate: l.date, linkedKind: "payment", linkedSource: "patient" }]);
+    }
     const rows: ProcedureRow[] = lines.map((l, i) => {
       const pid = String(docs[i]!.PatNum ?? "");
       return { ...l, patientId: pid, patientName: names.get(pid) || pid };
@@ -427,10 +568,12 @@ export const opendentalAdapter: PmsAdapter = {
     const pageDocs = (facet?.page ?? []) as Document[];
     const procNums = [...new Set(pageDocs.flatMap((g) => (g.procNums as string[]) ?? []).filter(Boolean))].slice(0, 20_000);
     const patNums = [...new Set(pageDocs.map((g) => g._id.patientId as string | undefined).filter((x): x is string => !!x))];
-    const [claimProcs, names, providers] = await Promise.all([
+    const allPatNums = [...new Set(pageDocs.flatMap((g) => (g.patients as string[]) ?? []).map(String))];
+    const [claimProcs, names, providers, patientPaid] = await Promise.all([
       procNums.length && m.claimProcs ? db.collection(m.claimProcs).find({ ProcNum: { $in: procNums }, Status: { $in: [...CLAIMPROC_PAID] } }, { projection: { ProcNum: 1, InsPayAmt: 1, WriteOff: 1 } }).toArray() : Promise.resolve([] as Document[]),
       patientNames(db, m, patNums),
       providersMap(db, m),
+      patientPortionByProc(db, m, allPatNums),
     ]);
     const byProc = new Map<string, { paid: number; writeOff: number }>();
     for (const cp of claimProcs) {
@@ -449,6 +592,7 @@ export const opendentalAdapter: PmsAdapter = {
           paid += e.paid;
           adjusted += e.writeOff;
         }
+        paid += patientPaid.get(String(pn)) ?? 0;
       }
       const charges = round2(Number(g.charges) || 0);
       const pid = (g._id.patientId as string | undefined) ?? null;

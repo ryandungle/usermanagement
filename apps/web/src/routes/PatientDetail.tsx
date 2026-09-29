@@ -318,7 +318,16 @@ function AllocationPopover({ title, description, items, side, source, children }
           </TableBody>
         </Table>
         <div className="text-muted-foreground border-t px-4 py-2 text-[11px]">
-          {source ? `Source: ${source} · ` : ""}{items.length} row{items.length === 1 ? "" : "s"} · ids {items.map((a) => a.paymentAllocationId ?? a.id).join(", ").slice(0, 80)}
+          {(() => {
+            const fifo = items.filter((a) => a.id.startsWith("fifo:")).length;
+            const real = items.length - fifo;
+            const parts = [
+              real > 0 && source ? `${real} row${real === 1 ? "" : "s"} from ${source}` : null,
+              fifo > 0 ? `${fifo} patient payment${fifo === 1 ? "" : "s"} applied oldest-first (no paysplit export)` : null,
+            ].filter(Boolean);
+            const ids = items.map((a) => a.paymentAllocationId).filter(Boolean).join(", ").slice(0, 80);
+            return `${parts.join(" · ")}${ids ? ` · ids ${ids}` : ""}`;
+          })()}
         </div>
       </PopoverContent>
     </Popover>
