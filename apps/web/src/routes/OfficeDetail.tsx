@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { BuildingIcon, HeartPulseIcon, UsersIcon } from "lucide-react";
+import { BuildingIcon, UsersIcon } from "lucide-react";
 import { ROLE_LABEL } from "@usermanagement/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,25 +123,6 @@ export function OfficeDetailPage({ officeId }: { officeId: string }) {
         )}
 
         {connector && connector.status === "ok" && <PmsSettingsCard officeId={officeId} connector={connector} onChange={setConnector} />}
-
-        {connector && connector.status === "ok" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><HeartPulseIcon className="size-4" /> Patients</CardTitle>
-              <CardDescription>Search patients and open a chart of procedures by date of service with payments.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                <Button asChild size="sm">
-                  <Link to="/offices/$officeId/patients" params={{ officeId }} search={{}}>Open patients</Link>
-                </Button>
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/offices/$officeId/procedures" params={{ officeId }} search={{}}>Procedures</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {connector && connector.status === "ok" && <CollectionBrowser key={connector.updatedAt} officeId={officeId} />}
       </div>
