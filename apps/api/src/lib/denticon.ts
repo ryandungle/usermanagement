@@ -374,22 +374,43 @@ export interface ProcedureGroup {
   lastDate: string;
 }
 
-export function procedureMatch(f: ProcedureFilters): Document {
-  const m: Document = { ledgerType: "C" };
-  const range: Document = {};
-  if (f.day) {
-    range.$gte = new Date(`${f.day}T00:00:00.000Z`);
-    range.$lte = new Date(`${f.day}T23:59:59.999Z`);
-  } else {
-    if (f.from) range.$gte = new Date(`${f.from}T00:00:00.000Z`);
-    if (f.to) range.$lte = new Date(`${f.to}T23:59:59.999Z`);
+/**
+ * transactionDate is a BSON date in some exports and an ISO string in others,
+ * so every bound is matched against both representations.
+ */
+function dateFieldRange(field: string, from?: string, to?: string): Document | null {
+  if (!from && !to) return null;
+  const asDate: Document = {};
+  const asString: Document = {};
+  if (from) {
+    asDate.$gte = new Date(`${from}T00:00:00.000Z`);
+    asString.$gte = from;
   }
-  if (Object.keys(range).length) m.transactionDate = range;
-  if (f.providerId) m.providerId = f.providerId;
-  if (f.patientId) m.patientId = f.patientId;
+  if (to) {
+    asDate.$lte = new Date(`${to}T23:59:59.999Z`);
+    asString.$lte = `${to}\uffff`;
+  }
+  return { $or: [{ [field]: asDate }, { [field]: asString }] };
+}
+
+/** Aggregation expression: "YYYY-MM-DD" of transactionDate whether stored as date or string. */
+export const TRANSACTION_DAY_EXPR: Document = {
+  $dateToString: {
+    format: "%Y-%m-%d",
+    date: { $convert: { input: "$transactionDate", to: "date", onError: null, onNull: null } },
+    onNull: "unknown",
+  },
+};
+
+export function procedureMatch(f: ProcedureFilters): Document {
+  const and: Document[] = [{ ledgerType: "C" }];
+  const range = f.day ? dateFieldRange("transactionDate", f.day, f.day) : dateFieldRange("transactionDate", f.from, f.to);
+  if (range) and.push(range);
+  if (f.providerId) and.push({ providerId: f.providerId });
+  if (f.patientId) and.push({ patientId: f.patientId });
   if (f.q) {
     const rx = { $regex: f.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
-    m.$or = [{ procedureCode: rx }, { description: rx }];
+    and.push({ $or: [{ procedureCode: rx }, { description: rx }] });
   }
-  return m;
+  return { $and: and };
 }

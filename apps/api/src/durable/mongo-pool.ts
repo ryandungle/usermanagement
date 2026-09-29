@@ -9,6 +9,7 @@ import {
   groupVisits,
   procedureMatch,
   providerName,
+  TRANSACTION_DAY_EXPR,
   toAllocation,
   toLedgerLine,
   toPatientSummary,
@@ -304,7 +305,7 @@ export class MongoPool extends DurableObject<PoolEnv> {
     return this.withClient(urlEncrypted, async (client) => {
       const db = client.db(database);
       const match = procedureMatch(filters);
-      const day = { $dateToString: { format: "%Y-%m-%d", date: "$transactionDate" } };
+      const day = TRANSACTION_DAY_EXPR;
       const id = groupBy === "date" ? { day } : groupBy === "patient" ? { patientId: "$patientId" } : { day, patientId: "$patientId" };
       const sort: Document = groupBy === "patient" ? { charges: -1, "_id.patientId": 1 } : { "_id.day": -1, charges: -1 };
       const [facet] = await db
