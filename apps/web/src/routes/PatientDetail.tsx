@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { PMS_LABEL } from "@usermanagement/shared";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
+import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteHeader } from "@/components/site-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { api, ApiError, type AllocationLink, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
+import { api, ApiError, type AllocationLink, type FamilySummary, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
 import { rememberedPatientsSearch } from "./Patients";
@@ -20,6 +20,8 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
   const [detail, setDetail] = useState<PatientDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | PaidStatus>("all");
+  const [family, setFamily] = useState<FamilySummary | null>(null);
+  const [familyError, setFamilyError] = useState<string | null>(null);
   const filteredTreatments = useMemo(
     () => (detail ? detail.treatments.filter((t) => statusFilter === "all" || t.payment?.status === statusFilter) : []),
     [detail, statusFilter],
@@ -37,6 +39,21 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
       cancelled = true;
     };
   }, [officeId, patientId]);
+
+  const familyAvailable = detail?.familyAvailable ?? false;
+  useEffect(() => {
+    let cancelled = false;
+    setFamily(null);
+    setFamilyError(null);
+    if (!familyAvailable) return;
+    api
+      .getFamily(officeId, patientId)
+      .then((r) => { if (!cancelled) setFamily(r.data); })
+      .catch((err) => { if (!cancelled) setFamilyError(err instanceof ApiError ? err.message : "Could not load family"); });
+    return () => {
+      cancelled = true;
+    };
+  }, [officeId, patientId, familyAvailable]);
 
   if (!me) return null;
 
@@ -150,6 +167,9 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             <TabsTrigger value="treatments">Treatments <Badge variant="secondary" className="ml-1 px-1.5">{totals.procedures}</Badge></TabsTrigger>
             <TabsTrigger value="visits">Visits <Badge variant="secondary" className="ml-1 px-1.5">{visits.filter((v) => v.procedures.length).length}</Badge></TabsTrigger>
             <TabsTrigger value="payments">Payments <Badge variant="secondary" className="ml-1 px-1.5">{payments.length}</Badge></TabsTrigger>
+            {detail.familyAvailable && (
+              <TabsTrigger value="family">Family {family && <Badge variant="secondary" className="ml-1 px-1.5">{family.members.length}</Badge>}</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="treatments">
@@ -196,6 +216,12 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
               </CardContent>
             </Card>
           </TabsContent>
+
+          {detail.familyAvailable && (
+            <TabsContent value="family">
+              <FamilyCard family={family} error={familyError} officeId={officeId} currentId={patientId} pmsLabel={PMS_LABEL[detail.pmsType] ?? "the practice system"} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </>
@@ -442,6 +468,130 @@ function LedgerTable({ lines, columns, footer, emptyText, source }: { lines: Led
           )}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+/** Everyone on the same guarantor account, with payments pooled the way the practice system splits them. */
+function FamilyCard({ family, error, officeId, currentId, pmsLabel }: { family: FamilySummary | null; error: string | null; officeId: string; currentId: string; pmsLabel: string }) {
+  if (error) return <div className="text-destructive p-4 text-sm">{error}</div>;
+  if (!family) return <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm"><LoaderIcon className="size-4 animate-spin" /> Loading family account…</div>;
+  const t = family.totals;
+  const mine = family.transfers.filter((x) => x.fromPatientId === currentId);
+  const toMe = family.transfers.filter((x) => x.toPatientId === currentId);
+  const me = family.members.find((m) => m.patientId === currentId);
+  const num = (v: number, tone?: "warn" | "good") => <span className={`tabular-nums ${tone === "warn" ? "text-amber-600 dark:text-amber-400" : tone === "good" ? "text-green-600 dark:text-green-400" : ""}`}>{money(v)}</span>;
+  return (
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><UsersIcon className="size-4" /> Family account</CardTitle>
+          <CardDescription>
+            {family.members.length} member{family.members.length === 1 ? "" : "s"} under guarantor #{family.guarantorId}. {pmsLabel} splits a payment across the family, so a credit on one member usually covers another member's portion.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Family patient portion" value={money(t.patientPortion)} sub={`${money(t.charges)} charged · ${money(t.insurancePaid)} insurance · ${money(t.writeOff)} written off`} />
+            <Stat label="Family payments" value={money(t.patientPaid)} sub={`${money(t.covered)} applied to portions${t.insuranceOver > 0.005 ? ` · ${money(t.insuranceOver)} insurance over fee also pooled` : ""}`} />
+            <Stat label="Still outstanding" value={money(t.outstanding)} sub={t.outstanding > 0 ? "portions no family payment reaches" : "every portion covered"} tone={t.outstanding > 0 ? "bad" : "good"} />
+            <Stat label="Family credit" value={money(t.credit)} sub={typeof t.pmsBalance === "number" ? `${pmsLabel} family balance ${money(t.pmsBalance)}${Math.abs(t.pmsBalance + t.credit - t.outstanding) < 0.01 ? " · matches" : ""}` : "left after pooling"} tone={t.credit > 0 ? "warn" : undefined} />
+          </div>
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader className="bg-muted">
+                <TableRow>
+                  <TableHead>Member</TableHead>
+                  <TableHead className="text-right">Procedures</TableHead>
+                  <TableHead className="text-right">Charges</TableHead>
+                  <TableHead className="text-right">Insurance</TableHead>
+                  <TableHead className="text-right">Write-off</TableHead>
+                  <TableHead className="text-right">Ins. over fee</TableHead>
+                  <TableHead className="text-right">Patient portion</TableHead>
+                  <TableHead className="text-right">Own payments</TableHead>
+                  <TableHead className="text-right">Covered (pooled)</TableHead>
+                  <TableHead className="text-right">Outstanding</TableHead>
+                  <TableHead className="text-right">{pmsLabel} balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {family.members.map((m) => (
+                  <TableRow key={m.patientId} className={m.isCurrent ? "bg-muted/40" : undefined}>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {m.isCurrent ? <span className="font-medium">{m.name}</span> : (
+                          <Link to="/offices/$officeId/patients/$patientId" params={{ officeId, patientId: m.patientId }} className="font-medium underline-offset-4 hover:underline">{m.name}</Link>
+                        )}
+                        <span className="text-muted-foreground font-mono text-xs">{m.patientId}</span>
+                        {m.isGuarantor && <Badge variant="outline" className="px-1.5">Guarantor</Badge>}
+                        {m.isCurrent && <Badge variant="secondary" className="px-1.5">This patient</Badge>}
+                        {!m.active && <Badge variant="outline" className="text-muted-foreground px-1.5">Inactive</Badge>}
+                      </div>
+                      {m.birthDate && <div className="text-muted-foreground text-xs">Born {dateLabel(m.birthDate)}</div>}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{m.procedures}</TableCell>
+                    <TableCell className="text-right">{num(m.charges)}</TableCell>
+                    <TableCell className="text-right">{num(m.insurancePaid)}</TableCell>
+                    <TableCell className="text-right">{num(m.writeOff)}</TableCell>
+                    <TableCell className="text-right">{num(m.insuranceOver)}</TableCell>
+                    <TableCell className="text-right">{num(m.patientPortion)}</TableCell>
+                    <TableCell className="text-right">{num(m.patientPaid)}</TableCell>
+                    <TableCell className="text-right">{num(m.familyCovered, m.familyCovered > m.ownApplied + 0.005 ? "good" : undefined)}</TableCell>
+                    <TableCell className="text-right">{num(m.outstanding, m.outstanding > 0 ? "warn" : undefined)}</TableCell>
+                    <TableCell className="text-right">{typeof m.pmsBalance === "number" ? num(m.pmsBalance) : <span className="text-muted-foreground">—</span>}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="bg-muted/50 font-medium">
+                  <TableCell>Family</TableCell>
+                  <TableCell className="text-right tabular-nums">{family.members.reduce((a, m) => a + m.procedures, 0)}</TableCell>
+                  <TableCell className="text-right">{num(t.charges)}</TableCell>
+                  <TableCell className="text-right">{num(t.insurancePaid)}</TableCell>
+                  <TableCell className="text-right">{num(t.writeOff)}</TableCell>
+                  <TableCell className="text-right">{num(t.insuranceOver)}</TableCell>
+                  <TableCell className="text-right">{num(t.patientPortion)}</TableCell>
+                  <TableCell className="text-right">{num(t.patientPaid)}</TableCell>
+                  <TableCell className="text-right">{num(t.covered)}</TableCell>
+                  <TableCell className="text-right">{num(t.outstanding, t.outstanding > 0 ? "warn" : undefined)}</TableCell>
+                  <TableCell className="text-right">{typeof t.pmsBalance === "number" ? num(t.pmsBalance) : <span className="text-muted-foreground">—</span>}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {(mine.length > 0 || toMe.length > 0 || (me && me.patientPaid - me.familyCovered > 0.005)) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Where this patient's money goes</CardTitle>
+            <CardDescription>After pooling the family's payments and any insurance paid above the fee, applied oldest-first.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-1.5 text-sm">
+            {me && <div>{money(me.familyCovered)} covers this patient's own portion{me.familyCovered < me.patientPortion - 0.005 ? ` (${money(me.patientPortion - me.familyCovered)} still open)` : ""}.</div>}
+            {mine.map((x) => (
+              <div key={x.toPatientId}>
+                {money(x.amount)} of this patient's credit covers {x.procedures} procedure{x.procedures === 1 ? "" : "s"} for{" "}
+                <Link to="/offices/$officeId/patients/$patientId" params={{ officeId, patientId: x.toPatientId }} className="font-medium underline-offset-4 hover:underline">{x.toName}</Link>.
+              </div>
+            ))}
+            {toMe.map((x) => (
+              <div key={x.fromPatientId}>
+                {money(x.amount)} of{" "}
+                <Link to="/offices/$officeId/patients/$patientId" params={{ officeId, patientId: x.fromPatientId }} className="font-medium underline-offset-4 hover:underline">{x.fromName}</Link>
+                's credit covers {x.procedures} of this patient's procedure{x.procedures === 1 ? "" : "s"}.
+              </div>
+            ))}
+            {t.credit > 0.005 && <div className="text-amber-600 dark:text-amber-400">{money(t.credit)} remains as family credit that no procedure in this export uses.</div>}
+          </CardContent>
+        </Card>
+      )}
+
+      {family.notes.length > 0 && (
+        <div className="text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs">
+          <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+          <div className="grid gap-1">{family.notes.map((n, i) => <span key={i}>{n}</span>)}</div>
+        </div>
+      )}
     </div>
   );
 }

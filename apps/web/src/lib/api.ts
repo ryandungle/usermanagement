@@ -228,6 +228,46 @@ export interface PatientDetail {
   pmsBalance?: number | null;
   allocationSource?: string;
   pmsType: PmsType;
+  familyAvailable: boolean;
+}
+
+export interface FamilyMember {
+  patientId: string;
+  name: string;
+  birthDate: string | null;
+  active: boolean;
+  isGuarantor: boolean;
+  isCurrent: boolean;
+  procedures: number;
+  charges: number;
+  insurancePaid: number;
+  writeOff: number;
+  /** Insurance + write-off above the recorded fee; account credit in Open Dental. */
+  insuranceOver: number;
+  patientPortion: number;
+  patientPaid: number;
+  ownApplied: number;
+  familyCovered: number;
+  outstanding: number;
+  balance: number;
+  pmsBalance: number | null;
+}
+
+export interface FamilyTransfer {
+  fromPatientId: string;
+  fromName: string;
+  toPatientId: string;
+  toName: string;
+  amount: number;
+  procedures: number;
+}
+
+export interface FamilySummary {
+  guarantorId: string;
+  members: FamilyMember[];
+  totals: { charges: number; insurancePaid: number; writeOff: number; insuranceOver: number; patientPortion: number; patientPaid: number; covered: number; outstanding: number; credit: number; balance: number; pmsBalance: number | null };
+  transfers: FamilyTransfer[];
+  notes: string[];
 }
 
 export type ProcedureGroupBy = "none" | "patient" | "date" | "both";
@@ -378,6 +418,8 @@ export const api = {
     request<{ data: PatientSummary[]; pagination: Pagination }>(`/api/offices/${officeId}/patients${qs({ ...params })}`),
   getPatient: (officeId: string, patientId: string) =>
     request<{ data: PatientDetail }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}`),
+  getFamily: (officeId: string, patientId: string) =>
+    request<{ data: FamilySummary }>(`/api/offices/${officeId}/patients/${encodeURIComponent(patientId)}/family`),
 
   listProcedures: (officeId: string, params: ProcedureFilters & { groupBy: "none" }) =>
     request<{ groupBy: "none"; data: ProcedureRow[]; providers: Record<string, string>; pagination: Pagination }>(`/api/offices/${officeId}/procedures${qs({ ...params })}`),

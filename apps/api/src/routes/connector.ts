@@ -9,7 +9,7 @@ import { officeAsScope, resolveOffice, type ResolvedOffice } from "../lib/scope.
 import { getActor, requireRank } from "../middleware/auth.js";
 import type { DocsResult } from "../durable/mongo-pool.js";
 import type { PmsConfig } from "../pms/index.js";
-import { GROUP_SORTS, PROCEDURE_SORTS, type PatientDetail, type PatientSummary, type ProcedureGroup, type ProcedureRow } from "../lib/denticon.js";
+import { GROUP_SORTS, PROCEDURE_SORTS, type FamilySummary, type PatientDetail, type PatientSummary, type ProcedureGroup, type ProcedureRow } from "../lib/denticon.js";
 
 const idParam = z.object({ id: z.uuid() });
 
@@ -283,6 +283,24 @@ export const connectorRoute = new Hono<AppEnv>()
     }
   })
 
+  // GET /api/offices/:id/patients/:patientId/family  (everyone on the same guarantor account, payments pooled)
+  .get("/:id/patients/:patientId/family", async (c) => {
+    const db = createDb(c.env.DATABASE_URL);
+    const r = await loadOfficeForActor(c, db);
+    if ("error" in r) return r.error;
+    const patientId = c.req.param("patientId");
+    if (!/^[\w-]{1,40}$/.test(patientId)) return c.json({ error: "Invalid patient id" }, 400);
+    const row = await loadConnector(db, r.office);
+    if (!row) return c.json({ error: "No connector configured" }, 404);
+    try {
+      const family = (await pool(c, r.office.officeId).getFamily(row.urlEncrypted, row.database, pmsConfigOf(row), patientId)) as unknown as FamilySummary | null;
+      if (!family) return c.json({ error: "Family view is not available for this practice system" }, 404);
+      return c.json({ data: family });
+    } catch (err) {
+      return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
+    }
+  })
+
   // GET /api/offices/:id/patients/:patientId  (patient + ledger grouped by date of service)
   .get("/:id/patients/:patientId", async (c) => {
     const db = createDb(c.env.DATABASE_URL);
@@ -295,7 +313,7 @@ export const connectorRoute = new Hono<AppEnv>()
     try {
       const detail = (await pool(c, r.office.officeId).getPatient(row.urlEncrypted, row.database, pmsConfigOf(row), patientId)) as unknown as PatientDetail | null;
       if (!detail) return c.json({ error: "Patient not found" }, 404);
-      return c.json({ data: { ...detail, pmsType: pmsConfigOf(row).type } });
+      return c.json({ data: { ...detail, pmsType: pmsConfigOf(row).type, familyAvailable: pmsConfigOf(row).type === "opendental" } });
     } catch (err) {
       return c.json({ error: `Query failed: ${errorText(err)}` }, 502);
     }

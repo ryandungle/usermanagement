@@ -1,6 +1,6 @@
 import type { Db } from "mongodb";
 import type { PmsMapping, PmsType } from "@usermanagement/shared";
-import type { PatientDetail, PatientSummary, ProcedureFilters, ProcedureGroup, ProcedureGroupBy, ProcedureRow } from "../lib/denticon.js";
+import type { FamilySummary, PatientDetail, PatientSummary, ProcedureFilters, ProcedureGroup, ProcedureGroupBy, ProcedureRow } from "../lib/denticon.js";
 
 export interface PmsConfig {
   type: PmsType;
@@ -41,6 +41,8 @@ export interface PmsAdapter {
   getPatient(db: Db, m: PmsMapping, patientId: string): Promise<PatientDetail | null>;
   listProcedures(db: Db, m: PmsMapping, filters: ProcedureFilters, page: number, pageSize: number, sort?: SortSpec): Promise<ProcedureListResult>;
   groupProcedures(db: Db, m: PmsMapping, groupBy: Exclude<ProcedureGroupBy, "none">, filters: ProcedureFilters, page: number, pageSize: number, sort?: SortSpec): Promise<ProcedureGroupResult>;
+  /** Family account view, for systems that bill per guarantor. */
+  getFamily?(db: Db, m: PmsMapping, patientId: string): Promise<FamilySummary | null>;
 }
 
 /** Shared string-range + date-range matcher for fields stored as either. */

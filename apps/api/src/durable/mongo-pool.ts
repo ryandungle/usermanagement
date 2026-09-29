@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { MongoClient, type Document } from "mongodb";
 import { decryptSecret } from "../lib/crypto.js";
 import { inferFields, isSafeCollectionName, orderCollections, toPlain } from "../lib/mongo.js";
-import type { PatientDetail, PatientSummary, ProcedureFilters, ProcedureGroupBy } from "../lib/denticon.js";
+import type { FamilySummary, PatientDetail, PatientSummary, ProcedureFilters, ProcedureGroupBy } from "../lib/denticon.js";
 import { getAdapter, type PatientListQuery, type PmsConfig, type SortSpec } from "../pms/index.js";
 
 /** Close the pool after this long without a request. */
@@ -141,6 +141,12 @@ export class MongoPool extends DurableObject<PoolEnv> {
 
   async getPatient(urlEncrypted: string, database: string, pms: PmsConfig, patientId: string): Promise<PatientDetail | null> {
     return this.withClient(urlEncrypted, (client) => getAdapter(pms.type).getPatient(client.db(database), pms.mapping, patientId));
+  }
+
+  async getFamily(urlEncrypted: string, database: string, pms: PmsConfig, patientId: string): Promise<FamilySummary | null> {
+    const adapter = getAdapter(pms.type);
+    if (!adapter.getFamily) return null;
+    return this.withClient(urlEncrypted, (client) => adapter.getFamily!(client.db(database), pms.mapping, patientId));
   }
 
   async listProcedures(urlEncrypted: string, database: string, pms: PmsConfig, filters: ProcedureFilters, page: number, pageSize: number, sort?: SortSpec) {

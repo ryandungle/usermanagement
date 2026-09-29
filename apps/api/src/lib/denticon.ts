@@ -426,6 +426,52 @@ export interface ProcedureFilters {
 export const PROCEDURE_SORTS = ["date", "patient", "code", "description", "provider", "amount"] as const;
 export const GROUP_SORTS = ["day", "patient", "procedures", "patients", "charges"] as const;
 
+/** One member of a family account (Open Dental: everyone under the same guarantor). */
+export interface FamilyMember {
+  patientId: string;
+  name: string;
+  birthDate: string | null;
+  active: boolean;
+  isGuarantor: boolean;
+  isCurrent: boolean;
+  procedures: number;
+  charges: number;
+  insurancePaid: number;
+  writeOff: number;
+  /** Insurance + write-off above the recorded fee; account credit in Open Dental. */
+  insuranceOver: number;
+  /** Sum of each procedure's fee less insurance and write-off, floored at zero. */
+  patientPortion: number;
+  /** Net payments entered under this member. */
+  patientPaid: number;
+  /** Portion covered when only this member's own payments are applied. */
+  ownApplied: number;
+  /** Portion covered when the whole family's payments are pooled. */
+  familyCovered: number;
+  outstanding: number;
+  /** Own charges + adjustments - own payments, ignoring family pooling. */
+  balance: number;
+  pmsBalance: number | null;
+}
+
+export interface FamilyTransfer {
+  fromPatientId: string;
+  fromName: string;
+  toPatientId: string;
+  toName: string;
+  amount: number;
+  procedures: number;
+}
+
+export interface FamilySummary {
+  guarantorId: string;
+  members: FamilyMember[];
+  totals: { charges: number; insurancePaid: number; writeOff: number; insuranceOver: number; patientPortion: number; patientPaid: number; covered: number; outstanding: number; credit: number; balance: number; pmsBalance: number | null };
+  /** Money from one member's payments applied to another member's procedures after pooling. */
+  transfers: FamilyTransfer[];
+  notes: string[];
+}
+
 export interface ProcedureRow extends LedgerLine {
   patientId: string;
   patientName: string;
