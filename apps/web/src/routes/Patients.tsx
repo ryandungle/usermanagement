@@ -15,6 +15,24 @@ import { useMe } from "@/lib/me";
 
 const PAGE_SIZE = 25;
 
+const stateKey = (officeId: string) => `um-patients-state:${officeId}`;
+
+/** Last list state (search, page, filter, sort) for an office, restored when the list is opened without params. */
+export function rememberedPatientsSearch(officeId: string): PatientsSearch {
+  try {
+    const raw = sessionStorage.getItem(stateKey(officeId));
+    return raw ? (JSON.parse(raw) as PatientsSearch) : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberPatientsSearch(officeId: string, search: PatientsSearch) {
+  try {
+    sessionStorage.setItem(stateKey(officeId), JSON.stringify(search));
+  } catch {}
+}
+
 export interface PatientsSearch {
   q?: string;
   page?: number;
@@ -54,6 +72,23 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   const active = search.active ?? "true";
   const sort = search.sort ?? "lastName";
   const order = search.order ?? "asc";
+
+  // Opened with no params (sidebar, back link): restore the last state for this office.
+  const bare = !search.q && !search.page && !search.active && !search.sort && !search.order;
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    if (!bare) return setRestored(true);
+    const remembered = rememberedPatientsSearch(officeId);
+    if (Object.keys(remembered).length > 0) {
+      navigate({ to: "/offices/$officeId/patients", params: { officeId }, search: remembered, replace: true });
+    } else {
+      setRestored(true);
+    }
+  }, [officeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!bare) rememberPatientsSearch(officeId, { q: q || undefined, page: page > 1 ? page : undefined, active: active !== "true" ? active : undefined, sort: sort !== "lastName" ? sort : undefined, order: order !== "asc" ? order : undefined });
+  }, [officeId, bare, q, page, active, sort, order]);
 
   const colsKey = `um-patient-cols:${officeId}`;
   useEffect(() => {
@@ -98,8 +133,8 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   }, [officeId, q, active, page, sort, order]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (restored || !bare) void load();
+  }, [load, restored, bare]);
 
   const go = (next: Partial<PatientsSearch>) =>
     navigate({

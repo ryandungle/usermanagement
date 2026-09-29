@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { api, ApiError, type LedgerLine, type PaidStatus, type PatientDetail, type Visit } from "@/lib/api";
 import { ageFrom, dateLabel, fullName, money } from "@/lib/format";
 import { useMe } from "@/lib/me";
+import { rememberedPatientsSearch } from "./Patients";
 
 export function PatientDetailPage({ officeId, patientId }: { officeId: string; patientId: string }) {
   const { me } = useMe();
@@ -39,7 +40,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
 
   const backLink = (
     <Button asChild variant="ghost" size="sm">
-      <Link to="/offices/$officeId/patients" params={{ officeId }} search={{}}><ArrowLeftIcon /> Patients</Link>
+      <Link to="/offices/$officeId/patients" params={{ officeId }} search={rememberedPatientsSearch(officeId)}><ArrowLeftIcon /> Patients</Link>
     </Button>
   );
 
