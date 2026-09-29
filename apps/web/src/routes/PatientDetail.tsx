@@ -100,7 +100,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
         </Card>
 
         {/* Totals */}
-        <div className={`grid grid-cols-2 gap-4 lg:grid-cols-4 ${(totals.insuranceOver ?? 0) > 0.005 ? "xl:grid-cols-8" : "xl:grid-cols-7"}`}>
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr))]">
           <Stat label="Treatments performed" value={String(totals.procedures)} sub={`over ${totals.visits} visit${totals.visits === 1 ? "" : "s"} · ${money(totals.charges)}`} />
           <Stat label="Paid in full" value={String(totals.paid)} sub="charge fully covered" tone="good" />
           <Stat label="Partially paid" value={String(totals.partial)} sub="some money applied" tone={totals.partial ? "warn" : undefined} />
@@ -144,7 +144,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
         )}
 
         <Tabs defaultValue="treatments">
-          <TabsList>
+          <TabsList className="h-auto flex-wrap">
             <TabsTrigger value="treatments">Treatments <Badge variant="secondary" className="ml-1 px-1.5">{totals.procedures}</Badge></TabsTrigger>
             <TabsTrigger value="visits">Visits <Badge variant="secondary" className="ml-1 px-1.5">{visits.filter((v) => v.procedures.length).length}</Badge></TabsTrigger>
             <TabsTrigger value="payments">Payments <Badge variant="secondary" className="ml-1 px-1.5">{payments.length}</Badge></TabsTrigger>
@@ -480,7 +480,7 @@ function FamilyCard({ family, error, officeId, currentId, pmsLabel }: { family: 
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
             <Stat label="Family patient portion" value={money(t.patientPortion)} sub={`${money(t.charges)} charged · ${money(t.insurancePaid)} insurance · ${money(t.writeOff)} written off`} />
             <Stat label="Family payments" value={money(t.patientPaid)} sub={`${money(t.covered)} applied to portions`} />
             <Stat label="Still outstanding" value={money(t.outstanding)} sub={t.outstanding > 0 ? "portions no family payment reaches" : "every portion covered"} tone={t.outstanding > 0 ? "bad" : "good"} />
@@ -634,12 +634,12 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                   <TableHead>Service</TableHead>
                   <TableHead>Sent</TableHead>
                   <TableHead>Carrier</TableHead>
-                  <TableHead>Type</TableHead>
+                  <TableHead className="hidden 2xl:table-cell">Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Billed</TableHead>
-                  <TableHead className="text-right">Est. insurance</TableHead>
+                  <TableHead className="hidden text-right md:table-cell">Est. ins.</TableHead>
                   <TableHead className="text-right">Ins. paid</TableHead>
-                  <TableHead className="text-right">Write-off</TableHead>
+                  <TableHead className="hidden text-right lg:table-cell">Write-off</TableHead>
                   <TableHead>Received</TableHead>
                 </TableRow>
               </TableHeader>
@@ -651,15 +651,18 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                     <React.Fragment key={c.claimId}>
                       <TableRow className="cursor-pointer" onClick={() => toggle(c.claimId)}>
                         <TableCell><ChevronRightIcon className={`text-muted-foreground size-4 transition-transform ${isOpen ? "rotate-90" : ""}`} /></TableCell>
-                        <TableCell className="whitespace-nowrap">{c.dateOfService ? dateLabel(c.dateOfService) : <span className="text-muted-foreground">—</span>}</TableCell>
-                        <TableCell className="whitespace-nowrap">{c.dateSent ? dateLabel(c.dateSent) : <span className="text-muted-foreground italic">not sent</span>}</TableCell>
-                        <TableCell className="max-w-56 truncate">{c.carrier ?? <span className="text-muted-foreground">—</span>}<div className="text-muted-foreground font-mono text-[11px]">#{c.claimId}{c.provider ? ` · ${c.provider}` : ""}</div></TableCell>
-                        <TableCell className="whitespace-nowrap">{c.type}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">{c.dateOfService ? dateLabel(c.dateOfService) : <span className="text-muted-foreground">—</span>}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs">{c.dateSent ? dateLabel(c.dateSent) : <span className="text-muted-foreground italic">not sent</span>}</TableCell>
+                        <TableCell>
+                          <div className="max-w-44 truncate xl:max-w-64" title={c.carrier ?? undefined}>{c.carrier ?? <span className="text-muted-foreground">—</span>}</div>
+                          <div className="text-muted-foreground max-w-44 truncate font-mono text-[11px] xl:max-w-64">#{c.claimId}<span className="2xl:hidden"> · {c.type}</span>{c.provider ? ` · ${c.provider}` : ""}</div>
+                        </TableCell>
+                        <TableCell className="hidden whitespace-nowrap 2xl:table-cell">{c.type}</TableCell>
                         <TableCell><span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium ${CLAIM_TONE[c.status]}`}>{c.statusLabel}</span></TableCell>
                         <TableCell className="text-right tabular-nums">{money(c.billed)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{money(c.estimate)}</TableCell>
+                        <TableCell className="hidden text-right tabular-nums md:table-cell">{money(c.estimate)}</TableCell>
                         <TableCell className={`text-right tabular-nums ${short ? "text-amber-600 dark:text-amber-400" : c.insurancePaid > 0 ? "text-green-600 dark:text-green-400" : ""}`}>{money(c.insurancePaid)}{short && <div className="text-[11px]">{money(c.estimate - c.insurancePaid)} under estimate</div>}</TableCell>
-                        <TableCell className="text-right tabular-nums">{c.writeOff ? money(c.writeOff) : ""}</TableCell>
+                        <TableCell className="hidden text-right tabular-nums lg:table-cell">{c.writeOff ? money(c.writeOff) : ""}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {c.dateReceived ? dateLabel(c.dateReceived)
                             : c.status === "sent" ? <span className="text-amber-600 dark:text-amber-400">{c.daysOutstanding ?? "?"} days out</span>
@@ -669,15 +672,15 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                       {isOpen && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
                           <TableCell />
-                          <TableCell colSpan={10} className="py-3">
-                            <div className="grid gap-4">
+                          <TableCell colSpan={10} className="max-w-0 py-3">
+                            <div className="grid gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_20rem]">
                               <div className="grid gap-1.5">
                                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Procedures on this claim</div>
                                 {c.procedures.length === 0 ? <div className="text-muted-foreground text-sm">No procedure lines in the export.</div> : (
                                   <Table>
                                     <TableHeader>
                                       <TableRow>
-                                        <TableHead>Date</TableHead>
+                                        <TableHead className="hidden md:table-cell">Date</TableHead>
                                         <TableHead>Code</TableHead>
                                         <TableHead>Procedure</TableHead>
                                         <TableHead className="text-right">Billed</TableHead>
@@ -689,9 +692,9 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                     <TableBody>
                                       {c.procedures.map((p, i) => (
                                         <TableRow key={`${p.procedureLedgerId ?? p.code}-${i}`}>
-                                          <TableCell className="text-muted-foreground whitespace-nowrap text-xs">{p.date ? dateLabel(p.date) : ""}</TableCell>
+                                          <TableCell className="text-muted-foreground hidden whitespace-nowrap text-xs md:table-cell">{p.date ? dateLabel(p.date) : ""}</TableCell>
                                           <TableCell className="font-mono text-xs">{p.code ?? ""}</TableCell>
-                                          <TableCell className="text-xs">{p.description}</TableCell>
+                                          <TableCell className="text-xs"><div className="max-w-56 truncate lg:max-w-md" title={p.description}>{p.description}</div></TableCell>
                                           <TableCell className="text-right text-xs tabular-nums">{money(p.feeBilled)}</TableCell>
                                           <TableCell className="text-right text-xs tabular-nums">{p.estimate == null ? "" : money(p.estimate)}</TableCell>
                                           <TableCell className="text-right text-xs tabular-nums">{money(p.insurancePaid)}</TableCell>
@@ -699,7 +702,7 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                         </TableRow>
                                       ))}
                                       <TableRow className="bg-muted/50 font-medium">
-                                        <TableCell colSpan={3} className="text-xs">Total across {c.procedures.length} procedure{c.procedures.length === 1 ? "" : "s"}</TableCell>
+                                        <TableCell className="hidden md:table-cell" /><TableCell colSpan={2} className="text-xs">Total across {c.procedures.length} procedure{c.procedures.length === 1 ? "" : "s"}</TableCell>
                                         <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.feeBilled)))}</TableCell>
                                         <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.estimate ?? 0)))}</TableCell>
                                         <TableCell className="text-right text-xs tabular-nums">{money(sum(c.procedures.map((p) => p.insurancePaid)))}</TableCell>
@@ -709,7 +712,7 @@ function ClaimsCard({ claims, pmsLabel }: { claims: Claim[]; pmsLabel: string })
                                   </Table>
                                 )}
                               </div>
-                              <div className="grid content-start gap-1.5 md:max-w-xl">
+                              <div className="grid content-start gap-1.5">
                                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Payments received</div>
                                 {c.payments.length === 0 ? (
                                   <div className="text-muted-foreground text-sm">{c.status === "sent" ? "Nothing received yet." : c.status === "unsent" ? "Claim has not been sent." : "No insurance payment recorded."}</div>
