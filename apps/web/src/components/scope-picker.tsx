@@ -61,18 +61,18 @@ export function ScopePicker({ me, role, value, onChange, lockCompany = false }: 
     <div className="grid gap-4">
       {showClient && (
         <div className="grid gap-2">
-          <Label>Client</Label>
+          <Label htmlFor="scope-client">Client</Label>
           <Select value={value.clientId ?? ""} onValueChange={(v) => onChange({ clientId: v || undefined })}>
-            <SelectTrigger><SelectValue placeholder="Select a client" /></SelectTrigger>
+            <SelectTrigger id="scope-client"><SelectValue placeholder="Select a client" /></SelectTrigger>
             <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       )}
       {showCompany && (
         <div className="grid gap-2">
-          <Label>Company</Label>
+          <Label htmlFor="scope-company">Company</Label>
           <Select value={value.companyId ?? ""} disabled={!clientId} onValueChange={(v) => onChange({ ...value, companyId: v || undefined, officeIds: [] })}>
-            <SelectTrigger><SelectValue placeholder="Select a company" /></SelectTrigger>
+            <SelectTrigger id="scope-company"><SelectValue placeholder="Select a company" /></SelectTrigger>
             <SelectContent>{companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
