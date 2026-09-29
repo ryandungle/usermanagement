@@ -8,7 +8,7 @@ import { isSafeCollectionName, parseMongoUrl } from "../lib/mongo.js";
 import { officeAsScope, resolveOffice, type ResolvedOffice } from "../lib/scope.js";
 import { getActor, requireRank } from "../middleware/auth.js";
 import type { DocsResult } from "../durable/mongo-pool.js";
-import type { PatientDetail, PatientSummary, ProcedureGroup, ProcedureRow } from "../lib/denticon.js";
+import { GROUP_SORTS, PROCEDURE_SORTS, type PatientDetail, type PatientSummary, type ProcedureGroup, type ProcedureRow } from "../lib/denticon.js";
 
 const idParam = z.object({ id: z.uuid() });
 
@@ -41,6 +41,9 @@ const proceduresQuery = z.object({
   q: z.string().trim().max(200).optional(),
   providerId: z.string().trim().max(40).optional(),
   patientId: z.string().regex(/^[\w-]{1,40}$/).optional(),
+  nonZero: z.enum(["true", "false"]).optional(),
+  sort: z.enum([...PROCEDURE_SORTS, ...GROUP_SORTS]).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(25),
 });
@@ -246,15 +249,17 @@ export const connectorRoute = new Hono<AppEnv>()
     if (!query.success) return c.json({ error: "Invalid query", issues: query.error.issues }, 400);
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
-    const { groupBy, page, pageSize, ...filters } = query.data;
+    const { groupBy, page, pageSize, sort, order, nonZero, ...rest } = query.data;
+    const filters = { ...rest, nonZero: nonZero === "true" };
+    const sortBy = sort ? { field: sort, order: order ?? "desc" } : undefined;
     const pagination = (total: number) => ({ page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
     try {
       const p = pool(c, r.office.officeId);
       if (groupBy === "none") {
-        const result = (await p.listProcedures(row.urlEncrypted, row.database, filters, page, pageSize)) as unknown as { rows: ProcedureRow[]; total: number; providers: Record<string, string> };
+        const result = (await p.listProcedures(row.urlEncrypted, row.database, filters, page, pageSize, sortBy)) as unknown as { rows: ProcedureRow[]; total: number; providers: Record<string, string> };
         return c.json({ groupBy, data: result.rows, providers: result.providers, pagination: pagination(result.total) });
       }
-      const result = (await p.groupProcedures(row.urlEncrypted, row.database, groupBy, filters, page, pageSize)) as unknown as { groups: ProcedureGroup[]; total: number; providers: Record<string, string> };
+      const result = (await p.groupProcedures(row.urlEncrypted, row.database, groupBy, filters, page, pageSize, sortBy)) as unknown as { groups: ProcedureGroup[]; total: number; providers: Record<string, string> };
       return c.json({ groupBy, data: result.groups, providers: result.providers, pagination: pagination(result.total) });
     } catch (err) {
       return c.json({ error: `Query failed: ${errorText(err)}` }, 502);

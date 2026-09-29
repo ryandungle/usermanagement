@@ -240,6 +240,9 @@ export interface ProcedureGroup {
   lastDate: string;
 }
 
+export type ProcedureSort = "date" | "patient" | "code" | "description" | "provider" | "amount";
+export type GroupSort = "day" | "patient" | "procedures" | "patients" | "charges";
+
 export interface ProcedureFilters {
   from?: string;
   to?: string;
@@ -247,6 +250,9 @@ export interface ProcedureFilters {
   q?: string;
   providerId?: string;
   patientId?: string;
+  nonZero?: "true" | "false";
+  sort?: ProcedureSort | GroupSort;
+  order?: "asc" | "desc";
   page?: number;
   pageSize?: number;
 }

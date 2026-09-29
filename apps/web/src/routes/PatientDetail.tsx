@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
+import { AlertTriangleIcon, ArrowLeftIcon, CalendarIcon, ShieldCheckIcon, CheckCircle2Icon, CircleDashedIcon, CircleIcon, CreditCardIcon, LoaderIcon, MailIcon, MapPinIcon, PhoneIcon, StethoscopeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,6 +63,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
   }
 
   const { summary: p, totals, visits, payments, patient } = detail;
+  const unapplied = payments.filter((l) => (l.applied?.unallocated ?? 0) > 0.005);
   const age = ageFrom(p.birthDate);
   const address = [patient.addressLine1, patient.addressLine2, [p.city, p.state].filter(Boolean).join(", "), patient.zip]
     .filter((x): x is string => typeof x === "string" && x.trim() !== "")
@@ -103,7 +104,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
         </Card>
 
         {/* Totals */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
           <Stat label="Treatments performed" value={String(totals.procedures)} sub={`over ${totals.visits} visit${totals.visits === 1 ? "" : "s"} · ${money(totals.charges)}`} />
           <Stat label="Paid in full" value={String(totals.paid)} sub="charge fully covered" tone="good" />
           <Stat label="Partially paid" value={String(totals.partial)} sub="some money applied" tone={totals.partial ? "warn" : undefined} />
@@ -113,8 +114,23 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             value={money(totals.payments)}
             sub={`${money(payments.filter((p) => p.source === "insurance").reduce((s, p) => s - p.amount, 0))} insurance · ${money(payments.filter((p) => p.source !== "insurance").reduce((s, p) => s - p.amount, 0))} patient${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`}
           />
+          <Stat label="Unapplied" value={money(totals.unallocatedPayments)} sub={unapplied.length ? `${unapplied.length} payment${unapplied.length === 1 ? "" : "s"} not applied to a charge` : "all payments applied"} tone={totals.unallocatedPayments > 0 ? "warn" : undefined} />
           <Stat label="Balance" value={money(totals.balance)} sub={totals.adjustments ? `after ${money(Math.abs(totals.adjustments))} in adjustments` : totals.balance > 0 ? "outstanding" : "settled"} tone={totals.balance > 0 ? "bad" : undefined} />
         </div>
+
+        {unapplied.length > 0 && (
+          <Card className="border-amber-500/40">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><AlertTriangleIcon className="size-4 text-amber-500" /> Unapplied payments</CardTitle>
+              <CardDescription>
+                Money received that has not been allocated to a charge in Denticon. It still counts toward the balance but leaves the treatments below showing as unpaid until it is applied.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LedgerTable lines={unapplied} columns={["date", "description", "source", "provider", "amount", "appliedAmount", "unapplied"]} />
+            </CardContent>
+          </Card>
+        )}
 
         <Tabs defaultValue="treatments">
           <TabsList>
@@ -304,9 +320,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-type Col = "date" | "code" | "description" | "tooth" | "surface" | "provider" | "fee" | "amount" | "paid" | "remaining" | "status" | "applied" | "source";
-const COL_LABEL: Record<Col, string> = { date: "Date", code: "Code", description: "Description", tooth: "Tooth", surface: "Surface", provider: "Provider", fee: "Fee", amount: "Amount", paid: "Paid", remaining: "Remaining", status: "Status", applied: "Applied to", source: "Source" };
-const RIGHT: Col[] = ["fee", "amount", "paid", "remaining"];
+type Col = "date" | "code" | "description" | "tooth" | "surface" | "provider" | "fee" | "amount" | "paid" | "remaining" | "status" | "applied" | "source" | "appliedAmount" | "unapplied";
+const COL_LABEL: Record<Col, string> = { date: "Date", code: "Code", description: "Description", tooth: "Tooth", surface: "Surface", provider: "Provider", fee: "Fee", amount: "Amount", paid: "Paid", remaining: "Remaining", status: "Status", applied: "Applied to", source: "Source", appliedAmount: "Applied", unapplied: "Unapplied" };
+const RIGHT: Col[] = ["fee", "amount", "paid", "remaining", "appliedAmount", "unapplied"];
 
 export function PaidBadge({ status }: { status: PaidStatus | undefined }) {
   switch (status) {
@@ -341,6 +357,8 @@ function LedgerTable({ lines, columns, footer, emptyText }: { lines: LedgerLine[
       }
       case "remaining": return l.payment ? money(l.payment.remaining) : "";
       case "status": return <PaidBadge status={l.payment?.status} />;
+      case "appliedAmount": return l.applied ? money(l.applied.total) : "";
+      case "unapplied": return l.applied ? <span className="text-amber-600 dark:text-amber-400">{money(l.applied.unallocated)}</span> : "";
       case "source": return l.source ? <Badge variant="outline" className="text-muted-foreground px-1.5">{l.source === "insurance" ? "Insurance" : l.source === "patient" ? "Patient" : "Other"}</Badge> : "";
       case "applied": {
         const a = l.applied;

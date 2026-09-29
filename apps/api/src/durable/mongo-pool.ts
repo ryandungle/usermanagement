@@ -277,13 +277,19 @@ export class MongoPool extends DurableObject<PoolEnv> {
     filters: ProcedureFilters,
     page: number,
     pageSize: number,
+    sort: { field: string; order: "asc" | "desc" } = { field: "date", order: "desc" },
   ): Promise<{ rows: ProcedureRow[]; total: number; providers: Record<string, string> }> {
     return this.withClient(urlEncrypted, async (client) => {
       const db = client.db(database);
       const match = procedureMatch(filters);
       const txns = db.collection(DENTICON.transactions);
+      const FIELD: Record<string, string> = { date: "transactionDate", patient: "patientId", code: "procedureCode", description: "description", provider: "providerId", amount: "amount" };
+      const dir = sort.order === "asc" ? 1 : -1;
+      const sortSpec: Record<string, 1 | -1> = { [FIELD[sort.field] ?? "transactionDate"]: dir };
+      if (!("transactionDate" in sortSpec)) sortSpec.transactionDate = -1;
+      sortSpec._id = -1;
       const [docs, total, providerDocs] = await Promise.all([
-        txns.find(match).sort({ transactionDate: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+        txns.find(match).sort(sortSpec).skip((page - 1) * pageSize).limit(pageSize).toArray(),
         txns.countDocuments(match, { limit: 200_000 }),
         db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
       ]);
@@ -313,13 +319,16 @@ export class MongoPool extends DurableObject<PoolEnv> {
     filters: ProcedureFilters,
     page: number,
     pageSize: number,
+    sortBy?: { field: string; order: "asc" | "desc" },
   ): Promise<{ groups: ProcedureGroup[]; total: number; providers: Record<string, string> }> {
     return this.withClient(urlEncrypted, async (client) => {
       const db = client.db(database);
       const match = procedureMatch(filters);
       const day = TRANSACTION_DAY_EXPR;
       const id = groupBy === "date" ? { day } : groupBy === "patient" ? { patientId: "$patientId" } : { day, patientId: "$patientId" };
-      const sort: Document = groupBy === "patient" ? { charges: -1, "_id.patientId": 1 } : { "_id.day": -1, charges: -1 };
+      const FIELD: Record<string, string> = { day: "_id.day", patient: "_id.patientId", procedures: "procedures", patients: "patientCount", charges: "charges" };
+      const defaultSort: Document = groupBy === "patient" ? { charges: -1, "_id.patientId": 1 } : { "_id.day": -1, charges: -1 };
+      const sort: Document = sortBy && FIELD[sortBy.field] ? { [FIELD[sortBy.field]!]: sortBy.order === "asc" ? 1 : -1, ...defaultSort } : defaultSort;
       const [facet] = await db
         .collection(DENTICON.transactions)
         .aggregate([
@@ -335,6 +344,7 @@ export class MongoPool extends DurableObject<PoolEnv> {
               ledgerIds: { $push: "$ledgerId" },
             },
           },
+          { $addFields: { patientCount: { $size: "$patients" } } },
           { $sort: sort },
           { $facet: { total: [{ $count: "n" }], page: [{ $skip: (page - 1) * pageSize }, { $limit: pageSize }] } },
         ], { allowDiskUse: true })

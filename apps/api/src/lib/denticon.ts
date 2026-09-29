@@ -412,7 +412,12 @@ export interface ProcedureFilters {
   patientId?: string;
   /** Exact day (YYYY-MM-DD); used when expanding a date group. */
   day?: string;
+  /** Drop $0 lines (no-charge codes). */
+  nonZero?: boolean;
 }
+
+export const PROCEDURE_SORTS = ["date", "patient", "code", "description", "provider", "amount"] as const;
+export const GROUP_SORTS = ["day", "patient", "procedures", "patients", "charges"] as const;
 
 export interface ProcedureRow extends LedgerLine {
   patientId: string;
@@ -467,6 +472,7 @@ export function procedureMatch(f: ProcedureFilters): Document {
   if (range) and.push(range);
   if (f.providerId) and.push({ providerId: f.providerId });
   if (f.patientId) and.push({ patientId: f.patientId });
+  if (f.nonZero) and.push({ amount: { $ne: 0 } });
   if (f.q) {
     const rx = { $regex: f.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
     and.push({ $or: [{ procedureCode: rx }, { description: rx }] });
