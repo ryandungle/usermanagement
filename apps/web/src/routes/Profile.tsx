@@ -1,9 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { ROLE_LABEL } from "@usermanagement/shared";
 import { authClient, useSession } from "../lib/auth-client";
 import { api, ApiError } from "../lib/api";
+import { useMe } from "../lib/me";
 
 export function ProfilePage() {
   const { data: session, refetch } = useSession();
+  const { me } = useMe();
   const user = session?.user;
   const [name, setName] = useState("");
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -35,6 +38,11 @@ export function ProfilePage() {
     setMsg({ kind: "ok", text: "Signed out of all other devices." });
   }
 
+  const scope = me?.scope;
+  const scopeParts = scope
+    ? [scope.clientName, scope.companyName, scope.officeName].filter(Boolean)
+    : [];
+
   return (
     <main className="page narrow">
       <h1>Your profile</h1>
@@ -46,7 +54,11 @@ export function ProfilePage() {
         </div>
         <div className="field">
           <label>Role</label>
-          <input value={user.role ?? "user"} disabled />
+          <input value={me ? ROLE_LABEL[me.actor.role] : "…"} disabled />
+        </div>
+        <div className="field">
+          <label>Scope</label>
+          <input value={scopeParts.length ? scopeParts.join(" › ") : "Global"} disabled />
         </div>
         <div className="field">
           <label htmlFor="name">Name</label>
@@ -61,9 +73,7 @@ export function ProfilePage() {
           </button>
         </div>
       </form>
-      <p className="muted">
-        Member since {new Date(user.createdAt).toLocaleDateString()}
-      </p>
+      <p className="muted">Member since {new Date(user.createdAt).toLocaleDateString()}</p>
     </main>
   );
 }

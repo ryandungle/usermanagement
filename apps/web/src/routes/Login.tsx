@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { signIn } from "../lib/auth-client";
 
 export function LoginPage() {
@@ -36,9 +36,7 @@ export function LoginPage() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
-      <p className="muted">
-        No account? <Link to="/register">Create one</Link>
-      </p>
+      <p className="muted">Accounts are created by your administrator.</p>
     </main>
   );
 }

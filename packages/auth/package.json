@@ -7,14 +7,18 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:admin": "tsx scripts/seed-admin.ts"
   },
   "dependencies": {
     "@usermanagement/db": "workspace:*",
+    "@usermanagement/shared": "workspace:*",
     "better-auth": "^1.7.6"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "dotenv": "^18.0.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
 }

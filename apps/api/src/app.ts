@@ -5,7 +5,10 @@ import { secureHeaders } from "hono/secure-headers";
 import { getAuth } from "@usermanagement/auth";
 import type { AppEnv } from "./env.js";
 import { sessionMiddleware } from "./middleware/auth.js";
+import { clientsRoute } from "./routes/clients.js";
+import { companiesRoute } from "./routes/companies.js";
 import { meRoute } from "./routes/me.js";
+import { officesRoute } from "./routes/offices.js";
 import { usersRoute } from "./routes/users.js";
 
 export const app = new Hono<AppEnv>()
@@ -35,6 +38,9 @@ export const app = new Hono<AppEnv>()
 
   .use("/api/*", sessionMiddleware)
   .route("/api/me", meRoute)
+  .route("/api/clients", clientsRoute)
+  .route("/api/companies", companiesRoute)
+  .route("/api/offices", officesRoute)
   .route("/api/users", usersRoute)
 
   .notFound((c) => c.json({ error: "Not found" }, 404))

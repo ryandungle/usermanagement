@@ -20,6 +20,9 @@ importers:
       '@usermanagement/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@usermanagement/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       better-auth:
         specifier: ^1.7.6
         version: 1.7.6(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260928.1)(@neondatabase/serverless@1.1.0)(kysely@0.29.6))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -48,6 +51,9 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.170.40
         version: 1.170.40(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@usermanagement/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       better-auth:
         specifier: ^1.7.6
         version: 1.7.6(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260928.1)(@neondatabase/serverless@1.1.0)(kysely@0.29.6))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -79,6 +85,9 @@ importers:
       '@usermanagement/db':
         specifier: workspace:*
         version: link:../db
+      '@usermanagement/shared':
+        specifier: workspace:*
+        version: link:../shared
       better-auth:
         specifier: ^1.7.6
         version: 1.7.6(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20260928.1)(@neondatabase/serverless@1.1.0)(kysely@0.29.6))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -86,6 +95,12 @@ importers:
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
+      dotenv:
+        specifier: ^18.0.4
+        version: 18.0.4
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -108,9 +123,12 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/shared:
+    devDependencies:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

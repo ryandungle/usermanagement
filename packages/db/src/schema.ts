@@ -1,28 +1,79 @@
 import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-/**
- * Better Auth core tables plus the columns added by the `admin` plugin
- * (`role`, `banned`, `banReason`, `banExpires` on `user`; `impersonatedBy` on
- * `session`). Column names follow Better Auth's defaults so the Drizzle adapter
- * needs no mapping configuration.
- */
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").notNull().default(false),
-  image: text("image"),
+const timestamps = {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at")
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-  // admin plugin
-  role: text("role").notNull().default("user"),
-  banned: boolean("banned").notNull().default(false),
-  banReason: text("ban_reason"),
-  banExpires: timestamp("ban_expires"),
+};
+
+// ---------------------------------------------------------------------------
+// Organization tree: client -> company -> office -> user
+// ---------------------------------------------------------------------------
+
+export const client = pgTable("client", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ...timestamps,
 });
+
+export const company = pgTable(
+  "company",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => client.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("company_client_id_idx").on(t.clientId)],
+);
+
+export const office = pgTable(
+  "office",
+  {
+    id: text("id").primaryKey(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("office_company_id_idx").on(t.companyId)],
+);
+
+// ---------------------------------------------------------------------------
+// Better Auth tables (+ admin plugin columns + our scope columns on user)
+// ---------------------------------------------------------------------------
+
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    ...timestamps,
+    // admin plugin
+    role: text("role").notNull().default("user"),
+    banned: boolean("banned").notNull().default(false),
+    banReason: text("ban_reason"),
+    banExpires: timestamp("ban_expires"),
+    // hierarchy scope (null = unrestricted at that level; see @usermanagement/shared)
+    clientId: text("client_id").references(() => client.id, { onDelete: "cascade" }),
+    companyId: text("company_id").references(() => company.id, { onDelete: "cascade" }),
+    officeId: text("office_id").references(() => office.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    index("user_client_id_idx").on(t.clientId),
+    index("user_company_id_idx").on(t.companyId),
+    index("user_office_id_idx").on(t.officeId),
+    index("user_role_idx").on(t.role),
+  ],
+);
 
 export const session = pgTable(
   "session",
@@ -30,11 +81,7 @@ export const session = pgTable(
     id: text("id").primaryKey(),
     expiresAt: timestamp("expires_at").notNull(),
     token: text("token").notNull().unique(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at")
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
+    ...timestamps,
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     userId: text("user_id")
@@ -62,11 +109,7 @@ export const account = pgTable(
     refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
     scope: text("scope"),
     password: text("password"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at")
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
+    ...timestamps,
   },
   (t) => [index("account_user_id_idx").on(t.userId)],
 );
@@ -78,17 +121,16 @@ export const verification = pgTable(
     identifier: text("identifier").notNull(),
     value: text("value").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at")
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
+    ...timestamps,
   },
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
-export const schema = { user, session, account, verification };
+export const schema = { client, company, office, user, session, account, verification };
 
+export type Client = typeof client.$inferSelect;
+export type Company = typeof company.$inferSelect;
+export type Office = typeof office.$inferSelect;
 export type User = typeof user.$inferSelect;
 export type NewUser = typeof user.$inferInsert;
 export type Session = typeof session.$inferSelect;

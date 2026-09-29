@@ -16,7 +16,8 @@
     "better-auth": "^1.7.6",
     "drizzle-orm": "^0.45.3",
     "hono": "^4.13.10",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@usermanagement/shared": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260928.1",
