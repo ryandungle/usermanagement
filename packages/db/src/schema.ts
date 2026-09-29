@@ -89,6 +89,10 @@ export const officeConnector = pgTable("office_connector", {
   database: text("database").notNull(),
   /** JSON array of collection names seen on the last successful test. */
   collections: text("collections").notNull().default("[]"),
+  /** Practice-management system the data comes from (see @usermanagement/shared PMS_TYPES). */
+  pmsType: text("pms_type").notNull().default("denticon"),
+  /** JSON object of collection-name overrides keyed by the adapter's collection keys. */
+  mapping: text("mapping").notNull().default("{}"),
   status: text("status").notNull().default("unknown"),
   lastError: text("last_error"),
   lastTestedAt: timestamp("last_tested_at"),

@@ -2,26 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { MongoClient, type Document } from "mongodb";
 import { decryptSecret } from "../lib/crypto.js";
 import { inferFields, isSafeCollectionName, orderCollections, toPlain } from "../lib/mongo.js";
-import {
-  DENTICON,
-  PATIENT_PROJECTION,
-  applyAllocations,
-  coverageByPatient,
-  INSURANCE_PROJECTION,
-  groupVisits,
-  procedureMatch,
-  providerName,
-  TRANSACTION_DAY_EXPR,
-  toAllocation,
-  toLedgerLine,
-  toPatientSummary,
-  type ProcedureFilters,
-  type ProcedureGroup,
-  type ProcedureGroupBy,
-  type ProcedureRow,
-  type PatientDetail,
-  type PatientSummary,
-} from "../lib/denticon.js";
+import type { PatientDetail, PatientSummary, ProcedureFilters, ProcedureGroupBy } from "../lib/denticon.js";
+import { getAdapter, type PatientListQuery, type PmsConfig, type SortSpec } from "../pms/index.js";
 
 /** Close the pool after this long without a request. */
 const IDLE_MS = 10 * 60 * 1000;
@@ -151,253 +133,22 @@ export class MongoPool extends DurableObject<PoolEnv> {
     });
   }
 
-  // ---- Denticon patient pages ----
+  // ---- Patient / procedure pages (per practice-management system) ----
 
-  /** Search patients by name, id, phone or email. Every word must match some field. */
-  async listPatients(
-    urlEncrypted: string,
-    database: string,
-    query: {
-      q?: string;
-      page: number;
-      pageSize: number;
-      activeOnly?: boolean;
-      sort?: string;
-      order?: "asc" | "desc";
-      /** Inclusive YYYY-MM-DD bounds on a date field (either bound optional). */
-      dateRange?: { field: "lastVisitDate" | "birthDate"; from?: string; to?: string };
-    },
-  ): Promise<{ patients: PatientSummary[]; total: number }> {
-    return this.withClient(urlEncrypted, async (client) => {
-      const coll = client.db(database).collection(DENTICON.patients);
-      const words = (query.q ?? "").split(/\s+/).filter(Boolean).slice(0, 5);
-      const and: Document[] = [];
-      if (query.activeOnly) and.push({ active: { $ne: false } });
-      for (const w of words) {
-        const rx = { $regex: w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
-        and.push({ $or: [{ firstName: rx }, { lastName: rx }, { nickname: rx }, { patientId: rx }, { cellPhone: rx }, { homePhone: rx }, { email: rx }, { chartNo: rx }] });
-      }
-      if (query.dateRange) {
-        // birthDate is stored as "YYYY-MM-DD"; lastVisitDate as a BSON date. Match either representation.
-        const { field, from, to } = query.dateRange;
-        const asString: Document = {};
-        const asDate: Document = {};
-        if (from) {
-          asString.$gte = from;
-          asDate.$gte = new Date(`${from}T00:00:00.000Z`);
-        }
-        if (to) {
-          asString.$lte = `${to}\uffff`;
-          asDate.$lte = new Date(`${to}T23:59:59.999Z`);
-        }
-        and.push({ $or: [{ [field]: asString }, { [field]: asDate }] });
-      }
-      const filter: Document = and.length ? { $and: and } : {};
-      const SORTABLE = new Set(["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"]);
-      const sortField = query.sort && SORTABLE.has(query.sort) ? query.sort : "lastName";
-      const dir = query.order === "desc" ? -1 : 1;
-      const sort: Record<string, 1 | -1> = { [sortField]: dir };
-      if (sortField !== "lastName") sort.lastName = 1;
-      if (sortField !== "firstName") sort.firstName = 1;
-      const [docs, total] = await Promise.all([
-        coll
-          .find(filter, { projection: PATIENT_PROJECTION })
-          .sort(sort)
-          .skip((query.page - 1) * query.pageSize)
-          .limit(query.pageSize)
-          .toArray(),
-        coll.countDocuments(filter, { limit: 100_000 }),
-      ]);
-      const patients = docs.map(toPatientSummary);
-      const ids = patients.map((p) => p.patientId).filter(Boolean);
-      if (ids.length) {
-        const rows = await client.db(database).collection(DENTICON.insurances).find({ patientId: { $in: ids } }, { projection: INSURANCE_PROJECTION }).toArray().catch(() => []);
-        const cov = coverageByPatient(rows);
-        for (const p of patients) p.coverage = cov.get(p.patientId) ?? p.coverage;
-      }
-      return { patients, total };
-    });
+  async listPatients(urlEncrypted: string, database: string, pms: PmsConfig, query: PatientListQuery): Promise<{ patients: PatientSummary[]; total: number }> {
+    return this.withClient(urlEncrypted, (client) => getAdapter(pms.type).listPatients(client.db(database), pms.mapping, query));
   }
 
-  /** One patient with their ledger grouped into visits by date of service. */
-  async getPatient(urlEncrypted: string, database: string, patientId: string): Promise<PatientDetail | null> {
-    return this.withClient(urlEncrypted, async (client) => {
-      const db = client.db(database);
-      const patient = await db.collection(DENTICON.patients).findOne({ patientId }, { projection: PATIENT_PROJECTION });
-      if (!patient) return null;
-      const [txns, providerDocs, allocationDocs, insuranceDocs] = await Promise.all([
-        db.collection(DENTICON.transactions).find({ patientId }).sort({ transactionDate: -1, createdOn: -1 }).limit(5000).toArray(),
-        db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
-        db.collection(DENTICON.allocations).find({ patientId }).limit(10000).toArray().catch(() => [] as Document[]),
-        db.collection(DENTICON.insurances).find({ patientId }, { projection: INSURANCE_PROJECTION }).toArray().catch(() => [] as Document[]),
-      ]);
-      const summary = toPatientSummary(patient);
-      summary.coverage = coverageByPatient(insuranceDocs).get(patientId) ?? summary.coverage;
-      const providers = Object.fromEntries(providerDocs.map(providerName));
-      const lines = txns.map((t) => toLedgerLine(t, providers));
-      applyAllocations(lines, allocationDocs.map(toAllocation));
-      const visits = groupVisits(lines);
-      const sum = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100;
-      const treatments = lines.filter((l) => l.kind === "procedure");
-      const paymentLines = lines.filter((l) => l.kind === "payment");
-      const charges = sum(treatments.map((l) => l.amount));
-      const payments = sum(paymentLines.map((l) => -l.amount));
-      const adjustments = sum(lines.filter((l) => l.kind === "adjustment").map((l) => l.amount));
-      const count = (status: string) => treatments.filter((l) => l.payment?.status === status).length;
-      return {
-        patient: toPlain(patient) as Record<string, unknown>,
-        summary,
-        totals: {
-          charges,
-          payments,
-          adjustments,
-          balance: Math.round((charges + adjustments - payments) * 100) / 100,
-          visits: visits.filter((v) => v.procedures.length > 0).length,
-          procedures: treatments.length,
-          paid: count("paid"),
-          partial: count("partial"),
-          unpaid: count("unpaid"),
-          unallocatedPayments: sum(paymentLines.map((l) => l.applied?.unallocated ?? 0)),
-        },
-        treatments,
-        visits,
-        payments: lines.filter((l) => l.kind === "payment"),
-        providers,
-        transactionCount: lines.length,
-      };
-    });
+  async getPatient(urlEncrypted: string, database: string, pms: PmsConfig, patientId: string): Promise<PatientDetail | null> {
+    return this.withClient(urlEncrypted, (client) => getAdapter(pms.type).getPatient(client.db(database), pms.mapping, patientId));
   }
 
-  // ---- Office-wide procedures ----
-
-  /** Flat, paginated list of charge lines with patient names and paid status. */
-  async listProcedures(
-    urlEncrypted: string,
-    database: string,
-    filters: ProcedureFilters,
-    page: number,
-    pageSize: number,
-    sort: { field: string; order: "asc" | "desc" } = { field: "date", order: "desc" },
-  ): Promise<{ rows: ProcedureRow[]; total: number; providers: Record<string, string> }> {
-    return this.withClient(urlEncrypted, async (client) => {
-      const db = client.db(database);
-      const match = procedureMatch(filters);
-      const txns = db.collection(DENTICON.transactions);
-      const FIELD: Record<string, string> = { date: "transactionDate", patient: "patientId", code: "procedureCode", description: "description", provider: "providerId", amount: "amount" };
-      const dir = sort.order === "asc" ? 1 : -1;
-      const sortSpec: Record<string, 1 | -1> = { [FIELD[sort.field] ?? "transactionDate"]: dir };
-      if (!("transactionDate" in sortSpec)) sortSpec.transactionDate = -1;
-      sortSpec._id = -1;
-      const [docs, total, providerDocs] = await Promise.all([
-        txns.find(match).sort(sortSpec).skip((page - 1) * pageSize).limit(pageSize).toArray(),
-        txns.countDocuments(match, { limit: 200_000 }),
-        db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
-      ]);
-      const providers = Object.fromEntries(providerDocs.map(providerName));
-      const lines = docs.map((d) => toLedgerLine(d, providers));
-      const ledgerIds = lines.map((l) => l.ledgerId).filter((x): x is string => !!x);
-      const patientIds = [...new Set(docs.map((d) => String(d.patientId ?? "")).filter(Boolean))];
-      const [allocDocs, patientDocs] = await Promise.all([
-        ledgerIds.length ? db.collection(DENTICON.allocations).find({ procedureLedgerId: { $in: ledgerIds } }).toArray() : [],
-        patientIds.length ? db.collection(DENTICON.patients).find({ patientId: { $in: patientIds } }, { projection: { patientId: 1, firstName: 1, lastName: 1 } }).toArray() : [],
-      ]);
-      applyAllocations(lines, allocDocs.map(toAllocation));
-      const names = new Map(patientDocs.map((p) => [String(p.patientId), [p.firstName, p.lastName].filter(Boolean).join(" ")]));
-      const rows: ProcedureRow[] = lines.map((l, i) => {
-        const pid = String(docs[i]!.patientId ?? "");
-        return { ...l, patientId: pid, patientName: names.get(pid) || pid };
-      });
-      return { rows, total, providers };
-    });
+  async listProcedures(urlEncrypted: string, database: string, pms: PmsConfig, filters: ProcedureFilters, page: number, pageSize: number, sort?: SortSpec) {
+    return this.withClient(urlEncrypted, (client) => getAdapter(pms.type).listProcedures(client.db(database), pms.mapping, filters, page, pageSize, sort));
   }
 
-  /** Grouped summaries (by patient, service day, or both) with paid amounts for the page. */
-  async groupProcedures(
-    urlEncrypted: string,
-    database: string,
-    groupBy: Exclude<ProcedureGroupBy, "none">,
-    filters: ProcedureFilters,
-    page: number,
-    pageSize: number,
-    sortBy?: { field: string; order: "asc" | "desc" },
-  ): Promise<{ groups: ProcedureGroup[]; total: number; providers: Record<string, string> }> {
-    return this.withClient(urlEncrypted, async (client) => {
-      const db = client.db(database);
-      const match = procedureMatch(filters);
-      const day = TRANSACTION_DAY_EXPR;
-      const id = groupBy === "date" ? { day } : groupBy === "patient" ? { patientId: "$patientId" } : { day, patientId: "$patientId" };
-      const FIELD: Record<string, string> = { day: "_id.day", patient: "_id.patientId", procedures: "procedures", patients: "patientCount", charges: "charges" };
-      const defaultSort: Document = groupBy === "patient" ? { charges: -1, "_id.patientId": 1 } : { "_id.day": -1, charges: -1 };
-      const sort: Document = sortBy && FIELD[sortBy.field] ? { [FIELD[sortBy.field]!]: sortBy.order === "asc" ? 1 : -1, ...defaultSort } : defaultSort;
-      const [facet] = await db
-        .collection(DENTICON.transactions)
-        .aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: id,
-              procedures: { $sum: 1 },
-              charges: { $sum: "$amount" },
-              patients: { $addToSet: "$patientId" },
-              firstDate: { $min: "$transactionDate" },
-              lastDate: { $max: "$transactionDate" },
-              ledgerIds: { $push: "$ledgerId" },
-            },
-          },
-          { $addFields: { patientCount: { $size: "$patients" } } },
-          { $sort: sort },
-          { $facet: { total: [{ $count: "n" }], page: [{ $skip: (page - 1) * pageSize }, { $limit: pageSize }] } },
-        ], { allowDiskUse: true })
-        .toArray();
-      const total = Number(facet?.total?.[0]?.n ?? 0);
-      const pageDocs = (facet?.page ?? []) as Document[];
-
-      // Paid / adjusted for exactly the procedures on this page of groups.
-      const ledgerIds = [...new Set(pageDocs.flatMap((g) => (g.ledgerIds as string[]) ?? []).filter(Boolean))].slice(0, 20_000);
-      const patientIds = [...new Set(pageDocs.map((g) => g._id.patientId as string | undefined).filter((x): x is string => !!x))];
-      const [allocDocs, patientDocs, providerDocs] = await Promise.all([
-        ledgerIds.length ? db.collection(DENTICON.allocations).find({ procedureLedgerId: { $in: ledgerIds } }, { projection: { procedureLedgerId: 1, amount: 1, ledgerType: 1 } }).toArray() : [],
-        patientIds.length ? db.collection(DENTICON.patients).find({ patientId: { $in: patientIds } }, { projection: { patientId: 1, firstName: 1, lastName: 1 } }).toArray() : [],
-        db.collection(DENTICON.providers).find({}, { projection: { providerId: 1, providerShortId: 1, title: 1, firstName: 1, lastName: 1 } }).toArray(),
-      ]);
-      const paidBy = new Map<string, { paid: number; adjusted: number }>();
-      for (const a of allocDocs) {
-        const k = String(a.procedureLedgerId);
-        const e = paidBy.get(k) ?? { paid: 0, adjusted: 0 };
-        if (a.ledgerType === "A") e.adjusted += Math.abs(Number(a.amount) || 0);
-        else e.paid += Math.abs(Number(a.amount) || 0);
-        paidBy.set(k, e);
-      }
-      const names = new Map(patientDocs.map((p) => [String(p.patientId), [p.firstName, p.lastName].filter(Boolean).join(" ")]));
-      const r2 = (n: number) => Math.round(n * 100) / 100;
-      const groups: ProcedureGroup[] = pageDocs.map((g) => {
-        let paid = 0;
-        let adjusted = 0;
-        for (const lid of (g.ledgerIds as string[]) ?? []) {
-          const e = paidBy.get(String(lid));
-          if (e) {
-            paid += e.paid;
-            adjusted += e.adjusted;
-          }
-        }
-        const charges = r2(Number(g.charges) || 0);
-        const pid = (g._id.patientId as string | undefined) ?? null;
-        return {
-          day: (g._id.day as string | undefined) ?? null,
-          patientId: pid,
-          patientName: pid ? names.get(pid) || pid : null,
-          procedures: Number(g.procedures) || 0,
-          patients: Array.isArray(g.patients) ? g.patients.length : 0,
-          charges,
-          paid: r2(paid),
-          adjusted: r2(adjusted),
-          remaining: r2(Math.max(0, charges - paid - adjusted)),
-          firstDate: g.firstDate instanceof Date ? g.firstDate.toISOString() : String(g.firstDate ?? ""),
-          lastDate: g.lastDate instanceof Date ? g.lastDate.toISOString() : String(g.lastDate ?? ""),
-        };
-      });
-      return { groups, total, providers: Object.fromEntries(providerDocs.map(providerName)) };
-    });
+  async groupProcedures(urlEncrypted: string, database: string, pms: PmsConfig, groupBy: Exclude<ProcedureGroupBy, "none">, filters: ProcedureFilters, page: number, pageSize: number, sort?: SortSpec) {
+    return this.withClient(urlEncrypted, (client) => getAdapter(pms.type).groupProcedures(client.db(database), pms.mapping, groupBy, filters, page, pageSize, sort));
   }
 
   /** Close the pool now (connector replaced or removed). */

@@ -115,8 +115,20 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
             sub={`${money(payments.filter((p) => p.source === "insurance").reduce((s, p) => s - p.amount, 0))} insurance · ${money(payments.filter((p) => p.source !== "insurance").reduce((s, p) => s - p.amount, 0))} patient${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`}
           />
           <Stat label="Unapplied" value={money(totals.unallocatedPayments)} sub={unapplied.length ? `${unapplied.length} payment${unapplied.length === 1 ? "" : "s"} not applied to a charge` : "all payments applied"} tone={totals.unallocatedPayments > 0 ? "warn" : undefined} />
-          <Stat label="Balance" value={money(totals.balance)} sub={totals.adjustments ? `after ${money(Math.abs(totals.adjustments))} in adjustments` : totals.balance > 0 ? "outstanding" : "settled"} tone={totals.balance > 0 ? "bad" : undefined} />
+          <Stat
+            label="Balance"
+            value={money(totals.balance)}
+            sub={typeof detail.pmsBalance === "number" && Math.abs(detail.pmsBalance - totals.balance) > 0.5 ? `practice system reports ${money(detail.pmsBalance)}` : totals.adjustments ? `after ${money(Math.abs(totals.adjustments))} in adjustments` : totals.balance > 0 ? "outstanding" : "settled"}
+            tone={totals.balance > 0 ? "bad" : undefined}
+          />
         </div>
+
+        {detail.notes.length > 0 && (
+          <div className="text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-xs">
+            <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+            <div className="grid gap-1">{detail.notes.map((n, i) => <span key={i}>{n}</span>)}</div>
+          </div>
+        )}
 
         {unapplied.length > 0 && (
           <Card className="border-amber-500/40">

@@ -70,6 +70,8 @@ export interface Overview {
   series: { date: string; newUsers: number; signIns: number }[];
 }
 
+import type { PmsCapabilities, PmsMapping, PmsType } from "@usermanagement/shared";
+
 export interface OfficeConnector {
   type: "mongodb";
   host: string;
@@ -79,6 +81,11 @@ export interface OfficeConnector {
   lastError: string | null;
   lastTestedAt: string | null;
   updatedAt: string;
+  pmsType: PmsType;
+  mapping: PmsMapping;
+  resolvedMapping: PmsMapping;
+  capabilities: PmsCapabilities;
+  missingCollections: string[];
 }
 
 export interface CollectionInfo {
@@ -217,6 +224,8 @@ export interface PatientDetail {
   payments: LedgerLine[];
   providers: Record<string, string>;
   transactionCount: number;
+  notes: string[];
+  pmsBalance?: number | null;
 }
 
 export type ProcedureGroupBy = "none" | "patient" | "date" | "both";
@@ -349,8 +358,10 @@ export const api = {
 
   // office connector + data browsing
   getConnector: (officeId: string) => request<{ data: OfficeConnector | null }>(`/api/offices/${officeId}/connector`),
-  saveConnector: (officeId: string, data: { type: "mongodb"; url: string; database?: string }) =>
+  saveConnector: (officeId: string, data: { type: "mongodb"; url: string; database?: string; pmsType?: PmsType; mapping?: PmsMapping }) =>
     request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector`, json("PUT", data)),
+  saveConnectorSettings: (officeId: string, data: { pmsType: PmsType; mapping?: PmsMapping }) =>
+    request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector/settings`, json("PATCH", data)),
   testConnector: (officeId: string) => request<{ data: OfficeConnector }>(`/api/offices/${officeId}/connector/test`, json("POST")),
   deleteConnector: (officeId: string) => request<{ data: { success: boolean } }>(`/api/offices/${officeId}/connector`, json("DELETE")),
   listCollections: (officeId: string) => request<{ data: CollectionInfo[] }>(`/api/offices/${officeId}/data/collections`),

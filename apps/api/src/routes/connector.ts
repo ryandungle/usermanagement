@@ -1,22 +1,46 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { createDb, eq, officeConnector, type Database } from "@usermanagement/db";
-import { scopeContains } from "@usermanagement/shared";
+import { PMS_CAPABILITIES, PMS_TYPES, detectPmsType, missingRequired, resolveMapping, scopeContains, type PmsMapping, type PmsType } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
 import { encryptSecret } from "../lib/crypto.js";
 import { isSafeCollectionName, parseMongoUrl } from "../lib/mongo.js";
 import { officeAsScope, resolveOffice, type ResolvedOffice } from "../lib/scope.js";
 import { getActor, requireRank } from "../middleware/auth.js";
 import type { DocsResult } from "../durable/mongo-pool.js";
+import type { PmsConfig } from "../pms/index.js";
 import { GROUP_SORTS, PROCEDURE_SORTS, type PatientDetail, type PatientSummary, type ProcedureGroup, type ProcedureRow } from "../lib/denticon.js";
 
 const idParam = z.object({ id: z.uuid() });
+
+const mappingSchema = z.record(z.string().max(64), z.string().trim().max(120)).optional();
 
 const putBody = z.object({
   type: z.literal("mongodb").default("mongodb"),
   url: z.string().trim().min(1).max(2000),
   database: z.string().trim().min(1).max(120).optional(),
+  pmsType: z.enum(PMS_TYPES).optional(),
+  mapping: mappingSchema,
 });
+
+const settingsBody = z.object({
+  pmsType: z.enum(PMS_TYPES),
+  mapping: mappingSchema,
+});
+
+function parseMapping(raw: string): PmsMapping {
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === "string")) as PmsMapping : {};
+  } catch {
+    return {};
+  }
+}
+
+function pmsConfigOf(row: typeof officeConnector.$inferSelect): PmsConfig {
+  const type = (PMS_TYPES as readonly string[]).includes(row.pmsType) ? (row.pmsType as PmsType) : "denticon";
+  return { type, mapping: resolveMapping(type, parseMapping(row.mapping)) };
+}
 
 export const PATIENT_SORTS = ["lastName", "firstName", "patientId", "birthDate", "lastVisitDate", "city"] as const;
 
@@ -55,15 +79,24 @@ const docsQuery = z.object({
 });
 
 function present(row: typeof officeConnector.$inferSelect) {
+  const collections = JSON.parse(row.collections) as string[];
+  const pms = pmsConfigOf(row);
   return {
     type: row.type,
     host: row.host,
     database: row.database,
-    collections: JSON.parse(row.collections) as string[],
+    collections,
     status: row.status,
     lastError: row.lastError,
     lastTestedAt: row.lastTestedAt,
     updatedAt: row.updatedAt,
+    pmsType: pms.type,
+    /** Office overrides only (defaults are known to the client). */
+    mapping: parseMapping(row.mapping),
+    /** Fully resolved collection names. */
+    resolvedMapping: pms.mapping,
+    capabilities: PMS_CAPABILITIES[pms.type],
+    missingCollections: missingRequired(pms.type, pms.mapping, collections).map((c) => c.key),
   };
 }
 
@@ -131,6 +164,8 @@ export const connectorRoute = new Hono<AppEnv>()
     const probed = await probe(c, r.office.officeId, urlEncrypted, parsed.database);
     if ("error" in probed) return c.json({ error: `Connection failed: ${probed.error}` }, 400);
 
+    const existing = await loadConnector(db, r.office);
+    const pmsType: PmsType = body.data.pmsType ?? detectPmsType(probed.collections) ?? (existing ? pmsConfigOf(existing).type : "denticon");
     const values = {
       type: body.data.type,
       urlEncrypted,
@@ -141,6 +176,8 @@ export const connectorRoute = new Hono<AppEnv>()
       lastError: null,
       lastTestedAt: new Date(),
       createdBy: getActor(c).id,
+      pmsType,
+      mapping: JSON.stringify(body.data.mapping ?? (existing && pmsConfigOf(existing).type === pmsType ? parseMapping(existing.mapping) : {})),
     };
     const [row] = await db
       .insert(officeConnector)
@@ -167,6 +204,30 @@ export const connectorRoute = new Hono<AppEnv>()
       .where(eq(officeConnector.officeId, r.office.officeId))
       .returning();
     return c.json({ data: present(updated!) }, "error" in probed ? 502 : 200);
+  })
+
+  // PATCH /api/offices/:id/connector/settings  { pmsType, mapping? } — change the system type / collection names.
+  .patch("/:id/connector/settings", async (c) => {
+    const db = createDb(c.env.DATABASE_URL);
+    const r = await loadOfficeForActor(c, db);
+    if ("error" in r) return r.error;
+    const row = await loadConnector(db, r.office);
+    if (!row) return c.json({ error: "No connector configured" }, 404);
+    const body = settingsBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "Invalid body", issues: body.error.issues }, 400);
+    const overrides: PmsMapping = Object.fromEntries(Object.entries(body.data.mapping ?? {}).filter(([, v]) => v.trim() !== ""));
+    const resolved = resolveMapping(body.data.pmsType, overrides);
+    const known = JSON.parse(row.collections) as string[];
+    const missing = missingRequired(body.data.pmsType, resolved, known);
+    if (missing.length) {
+      return c.json({ error: `Required collections not found in this database: ${missing.map((m) => `${m.label} (${resolved[m.key]})`).join(", ")}` }, 400);
+    }
+    const [updated] = await db
+      .update(officeConnector)
+      .set({ pmsType: body.data.pmsType, mapping: JSON.stringify(overrides) })
+      .where(eq(officeConnector.officeId, r.office.officeId))
+      .returning();
+    return c.json({ data: present(updated!) });
   })
 
   .delete("/:id/connector", async (c) => {
@@ -204,7 +265,7 @@ export const connectorRoute = new Hono<AppEnv>()
     if (!row) return c.json({ error: "No connector configured" }, 404);
     const { q, active, page, pageSize, sort, order, dateField, from, to } = query.data;
     try {
-      const result = (await pool(c, r.office.officeId).listPatients(row.urlEncrypted, row.database, {
+      const result = (await pool(c, r.office.officeId).listPatients(row.urlEncrypted, row.database, pmsConfigOf(row), {
         q,
         page,
         pageSize,
@@ -232,7 +293,7 @@ export const connectorRoute = new Hono<AppEnv>()
     const row = await loadConnector(db, r.office);
     if (!row) return c.json({ error: "No connector configured" }, 404);
     try {
-      const detail = (await pool(c, r.office.officeId).getPatient(row.urlEncrypted, row.database, patientId)) as unknown as PatientDetail | null;
+      const detail = (await pool(c, r.office.officeId).getPatient(row.urlEncrypted, row.database, pmsConfigOf(row), patientId)) as unknown as PatientDetail | null;
       if (!detail) return c.json({ error: "Patient not found" }, 404);
       return c.json({ data: detail });
     } catch (err) {
@@ -256,10 +317,10 @@ export const connectorRoute = new Hono<AppEnv>()
     try {
       const p = pool(c, r.office.officeId);
       if (groupBy === "none") {
-        const result = (await p.listProcedures(row.urlEncrypted, row.database, filters, page, pageSize, sortBy)) as unknown as { rows: ProcedureRow[]; total: number; providers: Record<string, string> };
+        const result = (await p.listProcedures(row.urlEncrypted, row.database, pmsConfigOf(row), filters, page, pageSize, sortBy)) as unknown as { rows: ProcedureRow[]; total: number; providers: Record<string, string> };
         return c.json({ groupBy, data: result.rows, providers: result.providers, pagination: pagination(result.total) });
       }
-      const result = (await p.groupProcedures(row.urlEncrypted, row.database, groupBy, filters, page, pageSize, sortBy)) as unknown as { groups: ProcedureGroup[]; total: number; providers: Record<string, string> };
+      const result = (await p.groupProcedures(row.urlEncrypted, row.database, pmsConfigOf(row), groupBy, filters, page, pageSize, sortBy)) as unknown as { groups: ProcedureGroup[]; total: number; providers: Record<string, string> };
       return c.json({ groupBy, data: result.groups, providers: result.providers, pagination: pagination(result.total) });
     } catch (err) {
       return c.json({ error: `Query failed: ${errorText(err)}` }, 502);

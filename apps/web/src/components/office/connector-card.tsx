@@ -6,6 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PMS_LABEL } from "@usermanagement/shared";
 import { api, ApiError, type OfficeConnector } from "@/lib/api";
 import { ConfirmDialog } from "@/components/dashboard/user-dialogs";
 
@@ -95,6 +96,7 @@ export function ConnectorCard({
         <>
           <CardContent className="grid gap-3 text-sm">
             <Row label="Type">MongoDB</Row>
+            <Row label="System">{PMS_LABEL[connector.pmsType]}{connector.missingCollections.length ? <span className="text-destructive ml-2 text-xs">missing: {connector.missingCollections.join(", ")}</span> : null}</Row>
             <Row label="Host">{connector.host}</Row>
             <Row label="Database">{connector.database}</Row>
             <Row label="Collections">

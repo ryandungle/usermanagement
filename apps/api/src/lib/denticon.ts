@@ -243,6 +243,10 @@ export interface PatientDetail {
   payments: LedgerLine[];
   providers: Record<string, string>;
   transactionCount: number;
+  /** Adapter caveats worth showing on the chart (e.g. what the export cannot tell us). */
+  notes: string[];
+  /** Balance as the practice system itself reports it, when the export carries one. */
+  pmsBalance?: number | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;

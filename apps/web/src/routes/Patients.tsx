@@ -78,6 +78,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
   const navigate = useNavigate();
   const [office, setOffice] = useState<Office | null>(null);
   const [offices, setOffices] = useState<Office[]>([]);
+  const [lastVisitSupported, setLastVisitSupported] = useState(true);
   const [rows, setRows] = useState<PatientSummary[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,6 +136,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
 
   useEffect(() => {
     api.getOffice(officeId).then((r) => setOffice(r.data)).catch(() => setOffice(null));
+    api.getConnector(officeId).then((r) => setLastVisitSupported(r.data?.capabilities.lastVisit ?? true)).catch(() => {});
     try {
       localStorage.setItem("um-clinical-office", officeId);
     } catch {}
@@ -195,7 +197,7 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
 
   if (!me) return null;
 
-  const cols = COLUMNS.filter((c) => visible.includes(c.key));
+  const cols = COLUMNS.filter((c) => visible.includes(c.key) && (lastVisitSupported || c.key !== "lastVisitDate"));
 
   const cell = (p: PatientSummary, key: ColKey) => {
     switch (key) {
@@ -255,10 +257,10 @@ export function PatientsPage({ officeId, search }: { officeId: string; search: P
             </SelectContent>
           </Select>
           <div className="flex items-center gap-1">
-            <Select value={dateField} onValueChange={(v) => go({ dateField: v as "lastVisitDate" | "birthDate", from: undefined, to: undefined, page: 1 })}>
+            <Select value={lastVisitSupported ? dateField : "birthDate"} onValueChange={(v) => go({ dateField: v as "lastVisitDate" | "birthDate", from: undefined, to: undefined, page: 1 })}>
               <SelectTrigger size="sm" className="w-32" aria-label="Date field"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="lastVisitDate">Last visit</SelectItem>
+                {lastVisitSupported && <SelectItem value="lastVisitDate">Last visit</SelectItem>}
                 <SelectItem value="birthDate">Birth date</SelectItem>
               </SelectContent>
             </Select>
