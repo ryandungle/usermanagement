@@ -107,7 +107,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {me && me.actor.role !== "user" && (
+        {me && orgItems.some((i) => i.show) && (
           <SidebarGroup>
             <SidebarGroupLabel>Organization</SidebarGroupLabel>
             <SidebarGroupContent>

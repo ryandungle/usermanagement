@@ -28,7 +28,10 @@ export function ScopePicker({ me, role, value, onChange, lockCompany = false }: 
 
   const showClient = !lockCompany && deeper(need, "global") && actorLevel === "global";
   const showCompany = !lockCompany && deeper(need, "client") && !deeper(actorLevel, "client");
-  const showOffice = deeper(need, "company") && !deeper(actorLevel, "company");
+  // Office-scoped actors pick among their own offices (only worth showing when they have several).
+  const actorOffices = me.scope.offices;
+  const actorIsOfficeScoped = actorLevel === "office";
+  const showOffice = deeper(need, "company") && (!actorIsOfficeScoped || actorOffices.length > 1);
 
   useEffect(() => {
     if (showClient) api.listClients().then((r) => setClients(r.data)).catch(() => setClients([]));
@@ -38,9 +41,17 @@ export function ScopePicker({ me, role, value, onChange, lockCompany = false }: 
     else setCompanies([]);
   }, [showCompany, clientId]);
   useEffect(() => {
-    if (showOffice && companyId) api.listOffices({ companyId }).then((r) => setOffices(r.data)).catch(() => setOffices([]));
+    if (actorIsOfficeScoped) setOffices(actorOffices.map((o) => ({ id: o.id, name: o.name, companyId: me.actor.companyId ?? "" })));
+    else if (showOffice && companyId) api.listOffices({ companyId }).then((r) => setOffices(r.data)).catch(() => setOffices([]));
     else setOffices([]);
-  }, [showOffice, companyId]);
+  }, [showOffice, companyId, actorIsOfficeScoped, actorOffices, me.actor.companyId]);
+
+  // An office-scoped actor's picks default to all of their offices.
+  useEffect(() => {
+    if (need === "office" && actorIsOfficeScoped && !(value.officeIds?.length)) {
+      onChange({ ...value, officeIds: actorOffices.map((o) => o.id) });
+    }
+  }, [need, actorIsOfficeScoped]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (need === "global") return <p className="text-muted-foreground text-sm">App admins have global scope.</p>;
 
