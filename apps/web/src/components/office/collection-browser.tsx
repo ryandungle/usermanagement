@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { humanizeCollectionName } from "@usermanagement/shared";
 import { api, ApiError, type CollectionInfo, type DocsPage } from "@/lib/api";
 import { CollectionPicker, PreferredChips } from "./collection-picker";
+import { ColumnPicker } from "./column-picker";
+import { Label } from "@/components/ui/label";
 
 const PAGE_SIZE = 25;
 
@@ -28,6 +30,31 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
+  const [allFields, setAllFields] = useState<string[]>([]);
+  const [visibleCols, setVisibleCols] = useState<string[] | null>(null);
+
+  const colsKey = active ? `um-cols:${officeId}:${active}` : null;
+
+  // Restore the remembered column choice when the collection changes.
+  useEffect(() => {
+    setAllFields([]);
+    if (!colsKey) return setVisibleCols(null);
+    try {
+      const raw = localStorage.getItem(colsKey);
+      setVisibleCols(raw ? (JSON.parse(raw) as string[]) : null);
+    } catch {
+      setVisibleCols(null);
+    }
+  }, [colsKey]);
+
+  function chooseColumns(next: string[]) {
+    setVisibleCols(next);
+    if (colsKey) {
+      try {
+        localStorage.setItem(colsKey, JSON.stringify(next));
+      } catch {}
+    }
+  }
 
   const loadCollections = useCallback(async () => {
     setError(null);
@@ -52,7 +79,16 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
     setError(null);
     api
       .listDocuments(officeId, active, { q: q || undefined, page: pageNo, pageSize: PAGE_SIZE })
-      .then((res) => { if (!cancelled) setPage(res); })
+      .then((res) => {
+        if (cancelled) return;
+        setPage(res);
+        // Union of fields seen so far for this collection (page 1 carries a wide sample).
+        setAllFields((prev) => {
+          const merged = [...prev];
+          for (const f of res.fields) if (!merged.includes(f)) merged.push(f);
+          return merged;
+        });
+      })
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Could not load documents"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => {
@@ -66,7 +102,7 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
     setPageNo(1);
   }
 
-  const fields = page?.fields ?? [];
+  const fields = visibleCols ? allFields.filter((f) => visibleCols.includes(f)) : allFields;
 
   return (
     <Card>
@@ -81,16 +117,31 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
           <p className="text-muted-foreground text-sm">{error ?? "No collections found in this database."}</p>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <CollectionPicker collections={collections} value={active} onChange={(v) => { setActive(v); setPageNo(1); setQ(""); }} />
-              <Button variant="ghost" size="icon" className="size-8" onClick={loadCollections} aria-label="Refresh collections">
-                <RefreshCwIcon />
-              </Button>
-              <span className="text-muted-foreground text-xs">{collections.length} collections</span>
-              <form onSubmit={onSearch} className="relative ml-auto">
-                <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
-                <Input name="q" placeholder={active ? `Search ${humanizeCollectionName(active).toLowerCase()}` : "Search text fields"} defaultValue={q} className="h-8 w-56 pl-8" />
-              </form>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="grid gap-1.5">
+                <Label className="text-muted-foreground text-xs">Collection</Label>
+                <div className="flex items-center gap-1">
+                  <CollectionPicker collections={collections} value={active} onChange={(v) => { setActive(v); setPageNo(1); setQ(""); }} />
+                  <Button variant="ghost" size="icon" className="size-8" onClick={loadCollections} aria-label="Refresh collections">
+                    <RefreshCwIcon />
+                  </Button>
+                </div>
+              </div>
+              <div className="ml-auto flex items-end gap-2">
+                {allFields.length > 0 && (
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground text-xs">Columns</Label>
+                    <ColumnPicker fields={allFields} value={fields} onChange={chooseColumns} />
+                  </div>
+                )}
+                <form onSubmit={onSearch} className="grid gap-1.5">
+                  <Label className="text-muted-foreground text-xs">Search</Label>
+                  <div className="relative">
+                    <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+                    <Input name="q" placeholder={active ? `Search ${humanizeCollectionName(active).toLowerCase()}` : "Search text fields"} defaultValue={q} className="h-8 w-56 pl-8" />
+                  </div>
+                </form>
+              </div>
             </div>
             <PreferredChips collections={collections} value={active} onChange={(v) => { setActive(v); setPageNo(1); setQ(""); }} />
           </div>

@@ -121,11 +121,13 @@ export class MongoPool extends DurableObject<PoolEnv> {
         filter = stringFields.size ? { $or: [...stringFields].map((f) => ({ [f]: { $regex: escaped, $options: "i" } })) } : { _id: null };
       }
       const skip = (query.page - 1) * query.pageSize;
-      const [docs, total] = await Promise.all([
+      const [docs, total, sample] = await Promise.all([
         coll.find(filter).sort({ _id: -1 }).skip(skip).limit(query.pageSize).toArray(),
         coll.countDocuments(filter, { limit: 100_000 }),
+        // Field discovery from a wider sample so optional fields still show up in the column picker.
+        query.page === 1 ? coll.find({}, { limit: 200 }).sort({ _id: -1 }).toArray() : Promise.resolve([] as Document[]),
       ]);
-      return { docs: docs.map((d) => toPlain(d) as Record<string, unknown>), fields: inferFields(docs), total };
+      return { docs: docs.map((d) => toPlain(d) as Record<string, unknown>), fields: inferFields([...docs, ...sample]), total };
     });
   }
 
