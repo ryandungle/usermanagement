@@ -122,7 +122,7 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
         </Card>
 
         {/* Totals */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-7">
+        <div className={`grid grid-cols-2 gap-4 lg:grid-cols-4 ${(totals.insuranceOver ?? 0) > 0.005 ? "xl:grid-cols-8" : "xl:grid-cols-7"}`}>
           <Stat label="Treatments performed" value={String(totals.procedures)} sub={`over ${totals.visits} visit${totals.visits === 1 ? "" : "s"} · ${money(totals.charges)}`} />
           <Stat label="Paid in full" value={String(totals.paid)} sub="charge fully covered" tone="good" />
           <Stat label="Partially paid" value={String(totals.partial)} sub="some money applied" tone={totals.partial ? "warn" : undefined} />
@@ -130,9 +130,12 @@ export function PatientDetailPage({ officeId, patientId }: { officeId: string; p
           <Stat
             label="Payments"
             value={money(totals.payments)}
-            sub={`${money(payments.filter((p) => p.source === "insurance").reduce((s, p) => s - p.amount, 0))} insurance · ${money(payments.filter((p) => p.source !== "insurance").reduce((s, p) => s - p.amount, 0))} patient${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} unapplied` : ""}`}
+            sub={`${money(payments.filter((p) => p.source === "insurance").reduce((s, p) => s - p.amount, 0))} insurance · ${money(payments.filter((p) => p.source !== "insurance").reduce((s, p) => s - p.amount, 0))} patient${totals.unallocatedPayments ? ` · ${money(totals.unallocatedPayments)} patient credit` : ""}`}
           />
-          <Stat label="Unapplied" value={money(totals.unallocatedPayments)} sub={unapplied.length ? `${unapplied.length} payment${unapplied.length === 1 ? "" : "s"} not applied to a charge` : "all payments applied"} tone={totals.unallocatedPayments > 0 ? "warn" : undefined} />
+          <Stat label="Patient credit" value={money(totals.unallocatedPayments)} sub={unapplied.length ? `${unapplied.length} payment${unapplied.length === 1 ? "" : "s"} not applied to a charge` : "all patient payments applied"} tone={totals.unallocatedPayments > 0 ? "warn" : undefined} />
+          {(totals.insuranceOver ?? 0) > 0.005 && (
+            <Stat label="Insurance over fee" value={money(totals.insuranceOver ?? 0)} sub={`on ${totals.insuranceOverCount ?? 0} procedure${totals.insuranceOverCount === 1 ? "" : "s"} · needs review`} tone="bad" />
+          )}
           <Stat
             label="Balance"
             value={money(totals.balance)}
@@ -491,11 +494,17 @@ function FamilyCard({ family, error, officeId, currentId, pmsLabel }: { family: 
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Stat label="Family patient portion" value={money(t.patientPortion)} sub={`${money(t.charges)} charged · ${money(t.insurancePaid)} insurance · ${money(t.writeOff)} written off`} />
-            <Stat label="Family payments" value={money(t.patientPaid)} sub={`${money(t.covered)} applied to portions${t.insuranceOver > 0.005 ? ` · ${money(t.insuranceOver)} insurance over fee also pooled` : ""}`} />
+            <Stat label="Family payments" value={money(t.patientPaid)} sub={`${money(t.covered)} applied to portions`} />
             <Stat label="Still outstanding" value={money(t.outstanding)} sub={t.outstanding > 0 ? "portions no family payment reaches" : "every portion covered"} tone={t.outstanding > 0 ? "bad" : "good"} />
-            <Stat label="Family credit" value={money(t.credit)} sub={typeof t.pmsBalance === "number" ? `${pmsLabel} family balance ${money(t.pmsBalance)}${Math.abs(t.pmsBalance + t.credit - t.outstanding) < 0.01 ? " · matches" : ""}` : "left after pooling"} tone={t.credit > 0 ? "warn" : undefined} />
+            <Stat label="Family credit" value={money(t.credit)} sub={t.credit > 0 ? "patient money left after pooling" : "no patient money left over"} tone={t.credit > 0 ? "warn" : undefined} />
+            <Stat
+              label="Insurance over fee"
+              value={money(t.insuranceOver)}
+              sub={typeof t.pmsBalance === "number" ? `${pmsLabel} nets this: family balance ${money(t.pmsBalance)}${Math.abs(t.pmsBalance - (t.outstanding - t.credit - t.insuranceOver)) < 0.01 ? " · reconciles" : ""}` : "not patient money · needs review"}
+              tone={t.insuranceOver > 0.005 ? "bad" : undefined}
+            />
           </div>
           <div className="overflow-x-auto rounded-md border">
             <Table>
@@ -582,6 +591,7 @@ function FamilyCard({ family, error, officeId, currentId, pmsLabel }: { family: 
               </div>
             ))}
             {t.credit > 0.005 && <div className="text-amber-600 dark:text-amber-400">{money(t.credit)} remains as family credit that no procedure in this export uses.</div>}
+            {t.insuranceOver > 0.005 && <div className="text-destructive">{money(t.insuranceOver)} was paid by insurance above the recorded fees. It is not applied to any charge here; the office needs to correct the fee, refund the carrier, or expect a recoupment.</div>}
           </CardContent>
         </Card>
       )}

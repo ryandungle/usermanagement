@@ -237,7 +237,11 @@ export interface PatientDetail {
     paid: number;
     partial: number;
     unpaid: number;
+    /** Patient money not applied to any charge. */
     unallocatedPayments: number;
+    /** Insurance + write-off above the recorded fee, kept separate from patient credit. */
+    insuranceOver?: number;
+    insuranceOverCount?: number;
   };
   treatments: LedgerLine[];
   visits: Visit[];

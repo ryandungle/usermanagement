@@ -280,11 +280,6 @@ function fifoAllocate(procs: FifoProc[], pays: FifoPay[]): { links: FifoLink[]; 
 }
 
 interface PortionProc extends FifoProc { patNum: string; fee: number; ins: number; wo: number; /** insurance + write-off above the fee */ over: number }
-
-/** Insurance paid above the recorded fee is account credit in Open Dental, so it joins the pool as a pseudo payment dated by the procedure. */
-function overpaymentPays(procs: PortionProc[]): FifoPay[] {
-  return procs.filter((p) => p.over > 0.005).map((p) => ({ key: `over:${p.key}`, date: p.date, amount: p.over }));
-}
 interface PortionPay extends FifoPay { patNum: string }
 
 /** Completed procedures (fee, insurance, write-off) and net payments for a set of patients. */
@@ -328,7 +323,7 @@ async function patientPortionByProc(db: Db, m: PmsMapping, patNums: string[]): P
   for (const p of pays) paysByPat.set(p.patNum, [...(paysByPat.get(p.patNum) ?? []), p]);
   const out = new Map<string, number>();
   for (const [pat, list] of procsByPat) {
-    const { byProc } = fifoAllocate(list, [...(paysByPat.get(pat) ?? []), ...overpaymentPays(list)]);
+    const { byProc } = fifoAllocate(list, paysByPat.get(pat) ?? []);
     for (const [k, v] of byProc) out.set(k, v);
   }
   return out;
@@ -473,10 +468,7 @@ export const opendentalAdapter: PmsAdapter = {
     const patPayLines = lines.filter((l) => l.kind === "payment" && l.source === "patient" && l.ledgerId);
     const fifo = fifoAllocate(
       procLines.map((l) => ({ key: l.ledgerId!, date: l.date, portion: Math.max(0, l.amount - (l.payment?.paid ?? 0) - (l.payment?.adjusted ?? 0)) })),
-      [
-        ...patPayLines.map((l) => ({ key: l.ledgerId!, date: l.date, amount: -l.amount })),
-        ...procLines.filter((l) => (l.payment?.paid ?? 0) + (l.payment?.adjusted ?? 0) - l.amount > 0.005).map((l) => ({ key: `over:${l.ledgerId!}`, date: l.date, amount: round2((l.payment?.paid ?? 0) + (l.payment?.adjusted ?? 0) - l.amount) })),
-      ],
+      patPayLines.map((l) => ({ key: l.ledgerId!, date: l.date, amount: -l.amount })),
     );
     const insuranceOver = round2(procLines.reduce((a, l) => a + Math.max(0, (l.payment?.paid ?? 0) + (l.payment?.adjusted ?? 0) - l.amount), 0));
     const overCount = procLines.filter((l) => (l.payment?.paid ?? 0) + (l.payment?.adjusted ?? 0) - l.amount > 0.005).length;
@@ -486,13 +478,10 @@ export const opendentalAdapter: PmsAdapter = {
     const linksByPay = new Map<string, AllocationLink[]>();
     for (const [n, fl] of fifo.links.entries()) {
       const proc = procByKey.get(fl.procKey)!;
-      const pay = payByKey.get(fl.payKey);
-      const overProc = fl.payKey.startsWith("over:") ? procByKey.get(fl.payKey.slice(5)) : undefined;
-      const payDate = pay?.date ?? overProc?.date ?? proc.date;
-      const payDesc = pay?.description ?? (overProc ? `Insurance paid over fee · ${overProc.code ?? ""} ${overProc.description}`.trim() : "Insurance paid over fee");
-      const base: Allocation = { id: `fifo:${n}`, paymentAllocationId: null, paymentLedgerId: fl.payKey, procedureLedgerId: fl.procKey, amount: fl.amount, ledgerType: "P", claimId: null, date: payDate };
-      linksByProc.set(fl.procKey, [...(linksByProc.get(fl.procKey) ?? []), { ...base, linkedLedgerId: fl.payKey, linkedDescription: payDesc, linkedCode: overProc?.code ?? null, linkedDate: payDate, linkedKind: pay ? "payment" : "procedure", linkedSource: pay ? "patient" : "insurance" }]);
-      if (pay) linksByPay.set(fl.payKey, [...(linksByPay.get(fl.payKey) ?? []), { ...base, linkedLedgerId: fl.procKey, linkedDescription: proc.description, linkedCode: proc.code, linkedDate: proc.date, linkedKind: "procedure", linkedSource: null }]);
+      const pay = payByKey.get(fl.payKey)!;
+      const base: Allocation = { id: `fifo:${n}`, paymentAllocationId: null, paymentLedgerId: fl.payKey, procedureLedgerId: fl.procKey, amount: fl.amount, ledgerType: "P", claimId: null, date: pay.date };
+      linksByProc.set(fl.procKey, [...(linksByProc.get(fl.procKey) ?? []), { ...base, linkedLedgerId: fl.payKey, linkedDescription: pay.description, linkedCode: null, linkedDate: pay.date, linkedKind: "payment", linkedSource: "patient" }]);
+      linksByPay.set(fl.payKey, [...(linksByPay.get(fl.payKey) ?? []), { ...base, linkedLedgerId: fl.procKey, linkedDescription: proc.description, linkedCode: proc.code, linkedDate: proc.date, linkedKind: "procedure", linkedSource: null }]);
     }
     for (const [k, amount] of fifo.byProc) addPatientPaid(procByKey.get(k)!, amount, linksByProc.get(k));
     for (const pay of patPayLines) {
@@ -521,7 +510,7 @@ export const opendentalAdapter: PmsAdapter = {
     return {
       patient: toPlain(patient) as Record<string, unknown>,
       summary: s,
-      totals: { charges, payments, adjustments, balance: round2(charges + adjustments - payments), visits: visits.filter((v) => v.procedures.length > 0).length, procedures: treatments.length, paid: count("paid"), partial: count("partial"), unpaid: count("unpaid"), unallocatedPayments: fifo.credit },
+      totals: { charges, payments, adjustments, balance: round2(charges + adjustments - payments), visits: visits.filter((v) => v.procedures.length > 0).length, procedures: treatments.length, paid: count("paid"), partial: count("partial"), unpaid: count("unpaid"), unallocatedPayments: fifo.credit, insuranceOver, insuranceOverCount: overCount },
       treatments,
       visits,
       payments: paymentLines,
@@ -529,7 +518,7 @@ export const opendentalAdapter: PmsAdapter = {
       transactionCount: lines.length,
       notes: [
         "Open Dental export: insurance payments and write-offs come from claim procs. The export has no paysplit rows, so patient payments are applied here to the oldest outstanding patient portion first (Open Dental's default split); the actual split in Open Dental may differ.",
-        ...(insuranceOver > 0.005 ? [`Insurance paid ${insuranceOver.toFixed(2)} more than the recorded fee on ${overCount} procedure${overCount === 1 ? "" : "s"}. Open Dental counts that excess as account credit, so it is applied to other portions here the same way.`] : []),
+        ...(insuranceOver > 0.005 ? [`Insurance paid ${insuranceOver.toFixed(2)} more than the recorded fee on ${overCount} procedure${overCount === 1 ? "" : "s"}. That excess is kept separate here: it is not patient money and cannot settle other charges. Open Dental nets it into the account balance, which is why its balance can look lower.`] : []),
         ...(pmsBalance !== null && Math.abs(round2(charges + adjustments - payments) - pmsBalance) > 0.005
           ? [`Open Dental reports a balance of ${pmsBalance.toFixed(2)} for this patient${guarantor && guarantor !== patientId ? ` (guarantor is patient ${guarantor})` : ""}. The difference from the balance computed here is money Open Dental split to other family members or accounts, which this export does not show.`]
           : []),
@@ -652,7 +641,7 @@ export const opendentalAdapter: PmsAdapter = {
     // Pool the whole family's payments across everyone's procedures, oldest first.
     const pooled = fifoAllocate(
       procs.map((p) => ({ key: `${p.patNum}:${p.key}`, date: p.date, portion: p.portion })),
-      [...pays.map((p) => ({ key: `${p.patNum}:${p.key}`, date: p.date, amount: p.amount })), ...procs.filter((p) => p.over > 0.005).map((p) => ({ key: `${p.patNum}:over:${p.key}`, date: p.date, amount: p.over }))],
+      pays.map((p) => ({ key: `${p.patNum}:${p.key}`, date: p.date, amount: p.amount })),
     );
     const coveredByPat = new Map<string, number>();
     const transferMap = new Map<string, FamilyTransfer & { procs: Set<string> }>();
@@ -678,7 +667,7 @@ export const opendentalAdapter: PmsAdapter = {
       const writeOff = sum(own.map((p) => p.wo));
       const patientPortion = sum(own.map((p) => p.portion));
       const patientPaid = sum(ownPays.map((p) => p.amount));
-      const solo = fifoAllocate(own, [...ownPays, ...overpaymentPays(own)]);
+      const solo = fifoAllocate(own, ownPays);
       const insuranceOver = sum(own.map((p) => p.over));
       const familyCovered = coveredByPat.get(id) ?? 0;
       return {
@@ -723,7 +712,7 @@ export const opendentalAdapter: PmsAdapter = {
       },
       transfers: [...transferMap.values()].map(({ procs: ps, ...t }) => ({ ...t, procedures: ps.size })).sort((a, b) => b.amount - a.amount),
       notes: [
-        "Open Dental splits a payment across the family account, and the export has no paysplit rows. Pooling every member's payments, plus any insurance paid above the recorded fee, and applying them to the family's oldest outstanding patient portions first is the closest reconstruction.",
+        "Open Dental splits a payment across the family account, and the export has no paysplit rows. Pooling every member's patient payments and applying them to the family's oldest outstanding patient portions first is the closest reconstruction. Insurance paid above the recorded fee is reported separately and never applied to a charge.",
       ],
     };
   },
