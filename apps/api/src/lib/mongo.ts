@@ -1,7 +1,6 @@
 import type { Document } from "mongodb";
 
-/** Collections we surface first when present (clinic domain). */
-export const PREFERRED_COLLECTIONS = ["patient", "appointment", "payment", "procedure"];
+export { orderCollections } from "@usermanagement/shared";
 
 export interface ParsedMongoUrl {
   host: string;
@@ -31,14 +30,6 @@ const SYSTEM_PREFIX = "system.";
 
 export function isSafeCollectionName(name: string) {
   return name.length > 0 && name.length <= 120 && !name.includes("$") && !name.startsWith(SYSTEM_PREFIX);
-}
-
-/** Preferred clinic collections first (in that order), then the rest alphabetically. */
-export function orderCollections(names: string[]): string[] {
-  const set = new Set(names);
-  const first = PREFERRED_COLLECTIONS.filter((n) => set.has(n));
-  const rest = names.filter((n) => !PREFERRED_COLLECTIONS.includes(n)).sort();
-  return [...first, ...rest];
 }
 
 /** Convert BSON values into plain JSON the browser can render. */

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, LoaderIcon, RefreshCwIcon, SearchIcon, XIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { humanizeCollectionName } from "@usermanagement/shared";
 import { api, ApiError, type CollectionInfo, type DocsPage } from "@/lib/api";
+import { CollectionPicker, PreferredChips } from "./collection-picker";
 
 const PAGE_SIZE = 25;
 
@@ -17,10 +17,6 @@ function cell(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   const s = JSON.stringify(value);
   return s.length > 60 ? s.slice(0, 57) + "…" : s;
-}
-
-function titleCase(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/[_-]+/g, " ");
 }
 
 export function CollectionBrowser({ officeId }: { officeId: string }) {
@@ -84,24 +80,19 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
         ) : collections.length === 0 ? (
           <p className="text-muted-foreground text-sm">{error ?? "No collections found in this database."}</p>
         ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <Tabs value={active ?? undefined} onValueChange={(v) => { setActive(v); setPageNo(1); setQ(""); }}>
-              <TabsList className="flex-wrap">
-                {collections.map((c) => (
-                  <TabsTrigger key={c.name} value={c.name}>
-                    {titleCase(c.name)}
-                    {c.count !== null && <Badge variant="secondary" className="ml-1 px-1.5">{c.count}</Badge>}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            <Button variant="ghost" size="icon" className="size-8" onClick={loadCollections} aria-label="Refresh collections">
-              <RefreshCwIcon />
-            </Button>
-            <form onSubmit={onSearch} className="relative ml-auto">
-              <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
-              <Input name="q" placeholder="Search text fields" defaultValue={q} className="h-8 w-56 pl-8" />
-            </form>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <CollectionPicker collections={collections} value={active} onChange={(v) => { setActive(v); setPageNo(1); setQ(""); }} />
+              <Button variant="ghost" size="icon" className="size-8" onClick={loadCollections} aria-label="Refresh collections">
+                <RefreshCwIcon />
+              </Button>
+              <span className="text-muted-foreground text-xs">{collections.length} collections</span>
+              <form onSubmit={onSearch} className="relative ml-auto">
+                <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+                <Input name="q" placeholder={active ? `Search ${humanizeCollectionName(active).toLowerCase()}` : "Search text fields"} defaultValue={q} className="h-8 w-56 pl-8" />
+              </form>
+            </div>
+            <PreferredChips collections={collections} value={active} onChange={(v) => { setActive(v); setPageNo(1); setQ(""); }} />
           </div>
         )}
 
@@ -155,7 +146,7 @@ export function CollectionBrowser({ officeId }: { officeId: string }) {
       <Sheet open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
         <SheetContent className="w-full overflow-auto sm:max-w-xl">
           <SheetHeader>
-            <SheetTitle>{active ? titleCase(active) : "Document"}</SheetTitle>
+            <SheetTitle>{active ? humanizeCollectionName(active) : "Document"}</SheetTitle>
             <SheetDescription className="font-mono text-xs">{selected ? String(selected._id ?? "") : ""}</SheetDescription>
           </SheetHeader>
           <pre className="bg-muted mx-4 mb-4 overflow-auto rounded-md p-3 font-mono text-xs">{selected ? JSON.stringify(selected, null, 2) : ""}</pre>
