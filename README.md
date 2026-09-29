@@ -18,20 +18,26 @@ same-origin and no CORS configuration is needed in production.
 ```
 app_admin        creates clients              global scope
  └ client_admin  creates companies            scoped to one client
-    └ company_owner  creates offices          scoped to one company
-       └ office_manager  creates users        scoped to one office
-          └ user                              belongs to one office
+    └ company_owner  creates offices          scoped to one company (legal entity)
+       └ office_manager  creates users        scoped to one or more offices (locations)
+          └ user                              works at one or more offices
 ```
+
+A **company is a legal entity** and an **office is a physical location**. A
+person is employed by one company and can work at any number of its offices;
+memberships live in the `user_office` table.
 
 Rules (implemented once in `packages/shared/src/rbac.ts`, enforced by the API
 and mirrored in the UI):
 
 - **Higher roles inherit everything below them, inside their own scope.** A
   company owner can create offices *and* users, but only within their company.
-- **Scope is stored on the user row** as `clientId` / `companyId` / `officeId`.
-  `null` means "all" at that level, so an app admin has all three null and an
-  office manager has all three set. The API always derives ancestor ids from
-  the leaf entity in the database; clients can never spoof them.
+- **Scope is `clientId` / `companyId` on the user row plus office memberships.**
+  `null` ids or an empty office list mean "all" at that level, so an app admin
+  has everything null and an office manager has a client, a company and at
+  least one office. Office-scoped actors see users who share at least one of
+  their offices. The API always derives ancestor ids from the offices in the
+  database, and all of a person's offices must belong to their company.
 - **You can only hand out roles strictly below your own.** App admins may also
   create other app admins.
 - **You can only manage (edit, re-role, reset password, ban, sign out, delete)
@@ -176,11 +182,12 @@ All routes live under `/api`. Better Auth owns `/api/auth/*` (`/sign-in/email`,
 | POST   | `/api/offices`                    | company_owner   | Create office `{ companyId, name }`       |
 | PATCH  | `/api/offices/:id`                | office_manager  | Rename                                    |
 | DELETE | `/api/offices/:id`                | company_owner   | Delete (cascades)                         |
-| GET    | `/api/users`                      | office_manager  | Users in scope (`q`, `role`, `banned`, `clientId`, `companyId`, `officeId`, `page`, `pageSize`, `sort`, `order`) |
-| POST   | `/api/users`                      | office_manager  | Create `{ name, email, password, role, clientId? \| companyId? \| officeId? }` |
+| GET    | `/api/users`                      | office_manager  | Users in scope (`q`, `role`, `banned`, `clientId`, `companyId`, `officeId`, `page`, `pageSize`, `sort`, `order`); each user carries `offices[]` |
+| POST   | `/api/users`                      | office_manager  | Create `{ name, email, password, role, clientId? \| companyId? \| officeIds? }` |
 | GET    | `/api/users/:id`                  | office_manager  | Get one user                              |
 | PATCH  | `/api/users/:id`                  | office_manager  | Update name / email                       |
 | PUT    | `/api/users/:id/role`             | office_manager  | Change role (and scope)                   |
+| PUT    | `/api/users/:id/offices`          | office_manager  | Replace office memberships `{ officeIds }` |
 | PUT    | `/api/users/:id/password`         | office_manager  | Reset password                            |
 | POST   | `/api/users/:id/ban`              | office_manager  | Ban (`reason?`, `expiresIn?` seconds)     |
 | POST   | `/api/users/:id/unban`            | office_manager  | Lift ban                                  |

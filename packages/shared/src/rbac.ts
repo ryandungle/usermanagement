@@ -8,9 +8,11 @@
  *   user           → no management rights       (belongs to one office)
  *
  * A higher role can do everything a lower role can, but only inside its own
- * scope. Scope is stored on the user row as (clientId, companyId, officeId);
- * a null means "all" at that level, so an app_admin has all three null and an
- * office_manager has all three set.
+ * scope. Scope is (clientId, companyId, officeIds): the ids live on the user
+ * row and office memberships in the user_office table. A null id / empty
+ * officeIds means "all" at that level, so an app_admin has everything null and
+ * an office-level role has clientId, companyId and at least one office. All of
+ * a person's offices belong to their one company.
  */
 
 export const ROLES = ["user", "office_manager", "company_owner", "client_admin", "app_admin"] as const;
@@ -54,8 +56,11 @@ export const CREATE_MIN_ROLE = {
 export interface Scope {
   clientId: string | null;
   companyId: string | null;
-  officeId: string | null;
+  /** Office memberships. Empty = unrestricted at office level (roles above office). */
+  officeIds: string[];
 }
+
+export const EMPTY_SCOPE: Scope = { clientId: null, companyId: null, officeIds: [] };
 
 export interface Actor extends Scope {
   id: string;
@@ -76,14 +81,20 @@ export function hasRank(actor: Pick<Actor, "role">, min: Role): boolean {
 }
 
 /**
- * True when `target` lies inside `actor`'s scope. Every non-null field of the
- * actor's scope must match the target exactly; null fields match anything.
+ * True when `target` lies inside `actor`'s scope. Non-null client/company ids
+ * must match exactly; when the actor is office-scoped the target must share at
+ * least one office with them. Null ids / empty office lists match anything.
  */
 export function scopeContains(actor: Scope, target: Scope): boolean {
   if (actor.clientId !== null && actor.clientId !== target.clientId) return false;
   if (actor.companyId !== null && actor.companyId !== target.companyId) return false;
-  if (actor.officeId !== null && actor.officeId !== target.officeId) return false;
+  if (actor.officeIds.length > 0 && !target.officeIds.some((id) => actor.officeIds.includes(id))) return false;
   return true;
+}
+
+/** Scope of a single office, for checking an office entity against an actor. */
+export function officeScope(clientId: string, companyId: string, officeId: string): Scope {
+  return { clientId, companyId, officeIds: [officeId] };
 }
 
 /**
@@ -114,11 +125,11 @@ export function canManageUser(actor: Actor, target: Actor): boolean {
 export function normalizeScopeForRole(role: Role, scope: Scope): Scope {
   switch (ROLE_LEVEL[role]) {
     case "global":
-      return { clientId: null, companyId: null, officeId: null };
+      return { clientId: null, companyId: null, officeIds: [] };
     case "client":
-      return { clientId: scope.clientId, companyId: null, officeId: null };
+      return { clientId: scope.clientId, companyId: null, officeIds: [] };
     case "company":
-      return { clientId: scope.clientId, companyId: scope.companyId, officeId: null };
+      return { clientId: scope.clientId, companyId: scope.companyId, officeIds: [] };
     case "office":
       return scope;
   }
@@ -134,7 +145,7 @@ export function scopeIsComplete(role: Role, scope: Scope): boolean {
     case "company":
       return scope.clientId !== null && scope.companyId !== null;
     case "office":
-      return scope.clientId !== null && scope.companyId !== null && scope.officeId !== null;
+      return scope.clientId !== null && scope.companyId !== null && scope.officeIds.length > 0;
   }
 }
 

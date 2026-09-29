@@ -43,7 +43,7 @@ export function SettingsPage() {
     setMsg({ kind: "ok", text: "Signed out of all other devices." });
   }
 
-  const scopeParts = me ? [me.scope.clientName, me.scope.companyName, me.scope.officeName].filter(Boolean) : [];
+  const scopeParts = me ? [me.scope.clientName, me.scope.companyName, me.scope.offices.map((o) => o.name).join(", ") || null].filter(Boolean) : [];
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { APIError } from "better-auth/api";
-import { createManagedUser, getAuth } from "@usermanagement/auth";
+import { createManagedUser, getAuth, setUserOffices } from "@usermanagement/auth";
 import {
   and,
   asc,
@@ -11,11 +11,15 @@ import {
   createDb,
   desc,
   eq,
+  exists,
   ilike,
+  inArray,
   office,
   or,
   session,
+  sql,
   user,
+  userOffice,
   type Database,
 } from "@usermanagement/db";
 import {
@@ -52,7 +56,8 @@ const idParam = z.object({ id: uuid });
 const scopeIds = {
   clientId: uuid.optional(),
   companyId: uuid.optional(),
-  officeId: uuid.optional(),
+  /** Offices for office-level roles; all must belong to one company. */
+  officeIds: z.array(uuid).max(50).optional(),
 };
 
 const createBody = z.object({
@@ -71,6 +76,8 @@ const updateBody = z
   .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update" });
 
 const roleBody = z.object({ role: z.enum(ROLES), ...scopeIds });
+
+const officesBody = z.object({ officeIds: z.array(uuid).min(1).max(50) });
 
 const passwordBody = z.object({ password: z.string().min(8).max(128) });
 
@@ -92,42 +99,77 @@ const publicColumns = {
   banExpires: user.banExpires,
   clientId: user.clientId,
   companyId: user.companyId,
-  officeId: user.officeId,
   clientName: client.name,
   companyName: company.name,
-  officeName: office.name,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 };
+
+type UserRow = {
+  [K in keyof typeof publicColumns]: (typeof publicColumns)[K]["_"]["data"] | null;
+} & { id: string; name: string; email: string; role: string };
+
+export interface PublicUser extends Omit<UserRow, "role"> {
+  role: string;
+  offices: { id: string; name: string }[];
+}
 
 function selectUsers(db: Database) {
   return db
     .select(publicColumns)
     .from(user)
     .leftJoin(client, eq(client.id, user.clientId))
-    .leftJoin(company, eq(company.id, user.companyId))
-    .leftJoin(office, eq(office.id, user.officeId));
+    .leftJoin(company, eq(company.id, user.companyId));
+}
+
+/** Attach office memberships to a page of user rows in one query. */
+async function withOffices(db: Database, rows: UserRow[]): Promise<PublicUser[]> {
+  if (rows.length === 0) return [];
+  const memberships = await db
+    .select({ userId: userOffice.userId, id: office.id, name: office.name })
+    .from(userOffice)
+    .innerJoin(office, eq(office.id, userOffice.officeId))
+    .where(inArray(userOffice.userId, rows.map((r) => r.id)))
+    .orderBy(asc(office.name));
+  const byUser = new Map<string, { id: string; name: string }[]>();
+  for (const m of memberships) {
+    const list = byUser.get(m.userId) ?? [];
+    list.push({ id: m.id, name: m.name });
+    byUser.set(m.userId, list);
+  }
+  return rows.map((r) => ({ ...r, offices: byUser.get(r.id) ?? [] }));
 }
 
 async function loadTarget(db: Database, id: string) {
-  const [row] = await selectUsers(db).where(eq(user.id, id));
-  if (!row) return null;
+  const [raw] = await selectUsers(db).where(eq(user.id, id));
+  if (!raw) return null;
+  const [row] = await withOffices(db, [raw]);
   const actor: Actor = {
-    id: row.id,
-    role: isRole(row.role) ? row.role : "user",
-    clientId: row.clientId,
-    companyId: row.companyId,
-    officeId: row.officeId,
+    id: row!.id,
+    role: isRole(row!.role) ? row!.role : "user",
+    clientId: row!.clientId,
+    companyId: row!.companyId,
+    officeIds: row!.offices.map((o) => o.id),
   };
-  return { row, actor };
+  return { row: row!, actor };
+}
+
+/** SQL condition: user belongs to at least one of these offices. */
+function inOffices(db: Database, officeIds: string[]) {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(userOffice)
+      .where(and(eq(userOffice.userId, user.id), inArray(userOffice.officeId, officeIds))),
+  );
 }
 
 /** Actor's scope as SQL conditions on the user table. */
-function scopeWhere(actor: Actor) {
+function scopeWhere(db: Database, actor: Actor) {
   return and(
     actor.clientId ? eq(user.clientId, actor.clientId) : undefined,
     actor.companyId ? eq(user.companyId, actor.companyId) : undefined,
-    actor.officeId ? eq(user.officeId, actor.officeId) : undefined,
+    actor.officeIds.length ? inOffices(db, actor.officeIds) : undefined,
   );
 }
 
@@ -153,16 +195,16 @@ export const usersRoute = new Hono<AppEnv>()
     const requested: Scope = {
       clientId: clientId ?? actor.clientId,
       companyId: companyId ?? actor.companyId,
-      officeId: officeId ?? actor.officeId,
+      officeIds: officeId ? [officeId] : actor.officeIds,
     };
     if (!scopeContains(actor, requested)) return c.json({ error: "Forbidden" }, 403);
 
     const db = createDb(c.env.DATABASE_URL);
     const where = and(
-      scopeWhere(actor),
+      scopeWhere(db, actor),
       requested.clientId ? eq(user.clientId, requested.clientId) : undefined,
       requested.companyId ? eq(user.companyId, requested.companyId) : undefined,
-      requested.officeId ? eq(user.officeId, requested.officeId) : undefined,
+      officeId ? inOffices(db, [officeId]) : undefined,
       q ? or(ilike(user.name, `%${q}%`), ilike(user.email, `%${q}%`)) : undefined,
       role ? eq(user.role, role) : undefined,
       banned ? eq(user.banned, banned === "true") : undefined,
@@ -181,12 +223,12 @@ export const usersRoute = new Hono<AppEnv>()
     ]);
 
     return c.json({
-      data: rows,
+      data: await withOffices(db, rows),
       pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     });
   })
 
-  // POST /api/users  { name, email, password, role, clientId? | companyId? | officeId? }
+  // POST /api/users  { name, email, password, role, clientId? | companyId? | officeIds? }
   .post("/", async (c) => {
     const parsed = createBody.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "Invalid body", issues: parsed.error.issues }, 400);
@@ -204,7 +246,7 @@ export const usersRoute = new Hono<AppEnv>()
     if (dupe) return c.json({ error: "A user with that email already exists" }, 409);
 
     try {
-      const created = await createManagedUser(getAuth(c.env), { name, email, password, role, ...resolved.scope });
+      const created = await createManagedUser(getAuth(c.env), db, { name, email, password, role, ...resolved.scope });
       const target = await loadTarget(db, created.id);
       return c.json({ data: target?.row }, 201);
     } catch (err) {
@@ -248,7 +290,7 @@ export const usersRoute = new Hono<AppEnv>()
     return c.json({ data: updated?.row });
   })
 
-  // PUT /api/users/:id/role  { role, clientId? | companyId? | officeId? }
+  // PUT /api/users/:id/role  { role, clientId? | companyId? | officeIds? }
   .put("/:id/role", async (c) => {
     const params = idParam.safeParse(c.req.param());
     if (!params.success) return c.json({ error: "Invalid user id" }, 400);
@@ -261,17 +303,46 @@ export const usersRoute = new Hono<AppEnv>()
     if (!canManageUser(actor, target.actor)) return c.json({ error: "Forbidden" }, 403);
     if (!canAssignRole(actor, body.data.role)) return c.json({ error: `You cannot assign ${body.data.role}` }, 403);
 
-    // Fall back to the target's current ids when the caller omits them.
+    // Fall back to the target's current scope when the caller omits ids.
     const resolved = await resolveScopeForLevel(db, ROLE_LEVEL[body.data.role], {
-      clientId: body.data.clientId ?? target.actor.clientId ?? undefined,
-      companyId: body.data.companyId ?? target.actor.companyId ?? undefined,
-      officeId: body.data.officeId ?? target.actor.officeId ?? undefined,
+      clientId: body.data.clientId ?? target.actor.clientId,
+      companyId: body.data.companyId ?? target.actor.companyId,
+      officeIds: body.data.officeIds ?? target.actor.officeIds,
     });
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     if (!scopeContains(actor, resolved.scope)) return c.json({ error: "Target scope is outside your scope" }, 403);
 
-    await db.update(user).set({ role: body.data.role, ...resolved.scope }).where(eq(user.id, params.data.id));
+    await db
+      .update(user)
+      .set({ role: body.data.role, clientId: resolved.scope.clientId, companyId: resolved.scope.companyId })
+      .where(eq(user.id, params.data.id));
+    await setUserOffices(db, params.data.id, resolved.scope.officeIds);
     await revokeAllSessions(db, params.data.id); // force re-auth with the new permissions
+    const updated = await loadTarget(db, params.data.id);
+    return c.json({ data: updated?.row });
+  })
+
+  // PUT /api/users/:id/offices  { officeIds }  — change memberships without touching the role
+  .put("/:id/offices", async (c) => {
+    const params = idParam.safeParse(c.req.param());
+    if (!params.success) return c.json({ error: "Invalid user id" }, 400);
+    const body = officesBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "Invalid body", issues: body.error.issues }, 400);
+    const actor = getActor(c);
+    const db = createDb(c.env.DATABASE_URL);
+    const target = await loadTarget(db, params.data.id);
+    if (!target) return c.json({ error: "User not found" }, 404);
+    if (!canManageUser(actor, target.actor)) return c.json({ error: "Forbidden" }, 403);
+    if (ROLE_LEVEL[target.actor.role] !== "office") return c.json({ error: "Only office-level roles belong to offices" }, 400);
+
+    const resolved = await resolveScopeForLevel(db, "office", { officeIds: body.data.officeIds });
+    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+    if (resolved.scope.companyId !== target.actor.companyId) {
+      return c.json({ error: "Offices must belong to the user's company" }, 400);
+    }
+    if (!scopeContains(actor, resolved.scope)) return c.json({ error: "Target scope is outside your scope" }, 403);
+
+    await setUserOffices(db, params.data.id, resolved.scope.officeIds);
     const updated = await loadTarget(db, params.data.id);
     return c.json({ data: updated?.row });
   })
@@ -352,6 +423,6 @@ export const usersRoute = new Hono<AppEnv>()
     const target = await loadTarget(db, params.data.id);
     if (!target) return c.json({ error: "User not found" }, 404);
     if (!canManageUser(getActor(c), target.actor)) return c.json({ error: "Forbidden" }, 403);
-    await db.delete(user).where(eq(user.id, params.data.id)); // sessions/accounts cascade
+    await db.delete(user).where(eq(user.id, params.data.id)); // sessions/accounts/memberships cascade
     return c.json({ data: { success: true } });
   });

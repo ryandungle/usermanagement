@@ -12,10 +12,10 @@ export interface ManagedUser {
   banExpires: string | null;
   clientId: string | null;
   companyId: string | null;
-  officeId: string | null;
   clientName: string | null;
   companyName: string | null;
-  officeName: string | null;
+  /** Office memberships (office-level roles only). */
+  offices: { id: string; name: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -51,7 +51,7 @@ export interface Office {
 export interface Me {
   user: { id: string; name: string; email: string; role: Role; createdAt: string };
   actor: Actor;
-  scope: { level: ScopeLevel; clientName: string | null; companyName: string | null; officeName: string | null };
+  scope: { level: ScopeLevel; clientName: string | null; companyName: string | null; offices: { id: string; name: string }[] };
   permissions: {
     assignableRoles: Role[];
     canManageUsers: boolean;
@@ -122,7 +122,7 @@ export interface CreateUserInput {
   role: Role;
   clientId?: string;
   companyId?: string;
-  officeId?: string;
+  officeIds?: string[];
 }
 
 const json = (method: string, data?: unknown): RequestInit => ({
@@ -163,8 +163,10 @@ export const api = {
   createUser: (data: CreateUserInput) => request<{ data: ManagedUser }>("/api/users", json("POST", data)),
   updateUser: (id: string, data: { name?: string; email?: string }) =>
     request<{ data: ManagedUser }>(`/api/users/${id}`, json("PATCH", data)),
-  setRole: (id: string, data: { role: Role; clientId?: string; companyId?: string; officeId?: string }) =>
+  setRole: (id: string, data: { role: Role; clientId?: string; companyId?: string; officeIds?: string[] }) =>
     request<{ data: ManagedUser }>(`/api/users/${id}/role`, json("PUT", data)),
+  setOffices: (id: string, officeIds: string[]) =>
+    request<{ data: ManagedUser }>(`/api/users/${id}/offices`, json("PUT", { officeIds })),
   setPassword: (id: string, password: string) =>
     request<{ data: { success: boolean } }>(`/api/users/${id}/password`, json("PUT", { password })),
   banUser: (id: string, data: { reason?: string; expiresIn?: number }) =>

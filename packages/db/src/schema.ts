@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core";
 
 const timestamps = {
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -62,17 +62,31 @@ export const user = pgTable(
     banned: boolean("banned").notNull().default(false),
     banReason: text("ban_reason"),
     banExpires: timestamp("ban_expires"),
-    // hierarchy scope (null = unrestricted at that level; see @usermanagement/shared)
+    // hierarchy scope (null = unrestricted at that level; see @usermanagement/shared).
+    // Office memberships live in user_office so a person can belong to several offices.
     clientId: text("client_id").references(() => client.id, { onDelete: "cascade" }),
     companyId: text("company_id").references(() => company.id, { onDelete: "cascade" }),
-    officeId: text("office_id").references(() => office.id, { onDelete: "cascade" }),
   },
   (t) => [
     index("user_client_id_idx").on(t.clientId),
     index("user_company_id_idx").on(t.companyId),
-    index("user_office_id_idx").on(t.officeId),
     index("user_role_idx").on(t.role),
   ],
+);
+
+/** Many-to-many: which offices a user (or office manager) belongs to. */
+export const userOffice = pgTable(
+  "user_office",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    officeId: text("office_id")
+      .notNull()
+      .references(() => office.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.officeId] }), index("user_office_office_id_idx").on(t.officeId)],
 );
 
 export const session = pgTable(
@@ -126,12 +140,13 @@ export const verification = pgTable(
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
 
-export const schema = { client, company, office, user, session, account, verification };
+export const schema = { client, company, office, user, userOffice, session, account, verification };
 
 export type Client = typeof client.$inferSelect;
 export type Company = typeof company.$inferSelect;
 export type Office = typeof office.$inferSelect;
 export type User = typeof user.$inferSelect;
+export type UserOffice = typeof userOffice.$inferSelect;
 export type NewUser = typeof user.$inferInsert;
 export type Session = typeof session.$inferSelect;
 export type Account = typeof account.$inferSelect;

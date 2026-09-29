@@ -3,7 +3,7 @@ import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { schema } from "./schema.js";
 
 export * from "./schema.js";
-export { eq, and, or, desc, asc, ilike, count, sql, inArray, isNull, getTableColumns } from "drizzle-orm";
+export { eq, and, or, desc, asc, ilike, count, sql, inArray, isNull, exists, getTableColumns } from "drizzle-orm";
 
 export type Database = NeonHttpDatabase<typeof schema>;
 

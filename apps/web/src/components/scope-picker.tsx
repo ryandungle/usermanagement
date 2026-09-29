@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ROLE_LEVEL, type Role, type ScopeLevel } from "@usermanagement/shared";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, type Client, type Company, type Me, type Office } from "@/lib/api";
@@ -7,14 +8,14 @@ import { api, type Client, type Company, type Me, type Office } from "@/lib/api"
 export interface PickedScope {
   clientId?: string;
   companyId?: string;
-  officeId?: string;
+  officeIds?: string[];
 }
 
 const ORDER: ScopeLevel[] = ["global", "client", "company", "office"];
 const deeper = (a: ScopeLevel, b: ScopeLevel) => ORDER.indexOf(a) > ORDER.indexOf(b);
 
 /** Cascading client → company → office selects, limited to what the role needs and the actor can see. */
-export function ScopePicker({ me, role, value, onChange }: { me: Me; role: Role; value: PickedScope; onChange: (next: PickedScope) => void }) {
+export function ScopePicker({ me, role, value, onChange, lockCompany = false }: { me: Me; role: Role; value: PickedScope; onChange: (next: PickedScope) => void; lockCompany?: boolean }) {
   const need = ROLE_LEVEL[role];
   const actorLevel = me.scope.level;
 
@@ -25,8 +26,8 @@ export function ScopePicker({ me, role, value, onChange }: { me: Me; role: Role;
   const clientId = value.clientId ?? me.actor.clientId ?? undefined;
   const companyId = value.companyId ?? me.actor.companyId ?? undefined;
 
-  const showClient = deeper(need, "global") && actorLevel === "global";
-  const showCompany = deeper(need, "client") && !deeper(actorLevel, "client");
+  const showClient = !lockCompany && deeper(need, "global") && actorLevel === "global";
+  const showCompany = !lockCompany && deeper(need, "client") && !deeper(actorLevel, "client");
   const showOffice = deeper(need, "company") && !deeper(actorLevel, "company");
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function ScopePicker({ me, role, value, onChange }: { me: Me; role: Role;
 
   if (need === "global") return <p className="text-muted-foreground text-sm">App admins have global scope.</p>;
 
-  const placed = need === "client" ? me.scope.clientName : need === "company" ? me.scope.companyName : me.scope.officeName;
+  const placed = need === "client" ? me.scope.clientName : need === "company" ? me.scope.companyName : me.scope.offices.map((o) => o.name).join(", ");
 
   return (
     <div className="grid gap-4">
@@ -59,7 +60,7 @@ export function ScopePicker({ me, role, value, onChange }: { me: Me; role: Role;
       {showCompany && (
         <div className="grid gap-2">
           <Label>Company</Label>
-          <Select value={value.companyId ?? ""} disabled={!clientId} onValueChange={(v) => onChange({ ...value, companyId: v || undefined, officeId: undefined })}>
+          <Select value={value.companyId ?? ""} disabled={!clientId} onValueChange={(v) => onChange({ ...value, companyId: v || undefined, officeIds: [] })}>
             <SelectTrigger><SelectValue placeholder="Select a company" /></SelectTrigger>
             <SelectContent>{companies.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
@@ -67,11 +68,33 @@ export function ScopePicker({ me, role, value, onChange }: { me: Me; role: Role;
       )}
       {showOffice && (
         <div className="grid gap-2">
-          <Label>Office</Label>
-          <Select value={value.officeId ?? ""} disabled={!companyId} onValueChange={(v) => onChange({ ...value, officeId: v || undefined })}>
-            <SelectTrigger><SelectValue placeholder="Select an office" /></SelectTrigger>
-            <SelectContent>{offices.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
-          </Select>
+          <Label>Offices</Label>
+          {!companyId ? (
+            <p className="text-muted-foreground text-sm">Choose a company first.</p>
+          ) : offices.length === 0 ? (
+            <p className="text-muted-foreground text-sm">This company has no offices yet.</p>
+          ) : (
+            <div className="grid max-h-48 gap-2 overflow-y-auto rounded-md border p-3">
+              {offices.map((o) => {
+                const checked = (value.officeIds ?? []).includes(o.id);
+                return (
+                  <label key={o.id} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(on) => {
+                        const set = new Set(value.officeIds ?? []);
+                        if (on) set.add(o.id);
+                        else set.delete(o.id);
+                        onChange({ ...value, officeIds: [...set] });
+                      }}
+                    />
+                    {o.name}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-muted-foreground text-xs">A person can work at several locations of the same legal entity.</p>
         </div>
       )}
       {!showClient && !showCompany && !showOffice && (

@@ -66,7 +66,7 @@ export function DashboardPage({ search }: { search: DashboardSearch }) {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <h2 className="text-lg font-semibold">Welcome, {me.user.name}</h2>
           <p className="text-muted-foreground max-w-md text-sm">
-            Your account is a member of {me.scope.officeName ?? "an office"}. Management tools appear here for office managers and above.
+            You work at {me.scope.offices.map((o) => o.name).join(", ") || "an office"} ({me.scope.companyName ?? "your company"}). Management tools appear here for office managers and above.
           </p>
           <Button asChild variant="outline" size="sm"><Link to="/settings">Account settings</Link></Button>
         </div>

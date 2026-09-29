@@ -51,7 +51,7 @@ export const companiesRoute = new Hono<AppEnv>()
     const parsed = createBody.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "Invalid body", issues: parsed.error.issues }, 400);
     const actor = getActor(c);
-    if (!scopeContains(actor, { clientId: parsed.data.clientId, companyId: null, officeId: null })) {
+    if (!scopeContains(actor, { clientId: parsed.data.clientId, companyId: null, officeIds: [] })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     const db = createDb(c.env.DATABASE_URL);
@@ -71,7 +71,7 @@ export const companiesRoute = new Hono<AppEnv>()
     const row = await resolveCompany(db, params.data.id);
     if (!row) return c.json({ error: "Company not found" }, 404);
     const actor = getActor(c);
-    if (!scopeContains(actor, { clientId: row.clientId, companyId: row.companyId, officeId: actor.officeId })) {
+    if (!scopeContains(actor, { clientId: row.clientId, companyId: row.companyId, officeIds: actor.officeIds })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     return c.json({ data: { id: row.companyId, name: row.companyName, clientId: row.clientId, clientName: row.clientName } });
@@ -85,7 +85,7 @@ export const companiesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const existing = await resolveCompany(db, params.data.id);
     if (!existing) return c.json({ error: "Company not found" }, 404);
-    if (!scopeContains(getActor(c), { clientId: existing.clientId, companyId: existing.companyId, officeId: null })) {
+    if (!scopeContains(getActor(c), { clientId: existing.clientId, companyId: existing.companyId, officeIds: [] })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     const [row] = await db.update(company).set({ name: parsed.data.name }).where(eq(company.id, params.data.id)).returning();
@@ -98,7 +98,7 @@ export const companiesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const existing = await resolveCompany(db, params.data.id);
     if (!existing) return c.json({ error: "Company not found" }, 404);
-    if (!scopeContains(getActor(c), { clientId: existing.clientId, companyId: existing.companyId, officeId: null })) {
+    if (!scopeContains(getActor(c), { clientId: existing.clientId, companyId: existing.companyId, officeIds: [] })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     await db.delete(company).where(eq(company.id, params.data.id));

@@ -89,12 +89,23 @@ export function EditUserDialog({ user, onClose, onConfirm }: { user: ManagedUser
 export function RoleDialog({ me, user, onClose, onConfirm }: { me: Me; user: ManagedUser; onClose: () => void; onConfirm: (d: { role: Role } & PickedScope) => void }) {
   const roles = me.permissions.assignableRoles;
   const [role, setRole] = useState<Role>(roles.includes(user.role) ? user.role : (roles[0] ?? "user"));
-  const [scope, setScope] = useState<PickedScope>({ clientId: user.clientId ?? undefined, companyId: user.companyId ?? undefined, officeId: user.officeId ?? undefined });
+  const [scope, setScope] = useState<PickedScope>({ clientId: user.clientId ?? undefined, companyId: user.companyId ?? undefined, officeIds: user.offices.map((o) => o.id) });
   return (
     <Frame title={`Change role for ${user.name}`} description="Changing the role signs the user out of all devices." onClose={onClose} submitLabel="Save"
       onSubmit={(e) => { e.preventDefault(); onConfirm({ role, ...scope }); }}>
       <RoleSelect roles={roles} value={role} onChange={setRole} />
       <ScopePicker me={me} role={role} value={scope} onChange={setScope} />
+    </Frame>
+  );
+}
+
+/** Change office memberships for an office-level user without changing their role. */
+export function OfficesDialog({ me, user, onClose, onConfirm }: { me: Me; user: ManagedUser; onClose: () => void; onConfirm: (officeIds: string[]) => void }) {
+  const [scope, setScope] = useState<PickedScope>({ clientId: user.clientId ?? undefined, companyId: user.companyId ?? undefined, officeIds: user.offices.map((o) => o.id) });
+  return (
+    <Frame title={`Offices for ${user.name}`} description={`Locations of ${user.companyName ?? "their company"} this person works at.`} onClose={onClose} submitLabel="Save"
+      onSubmit={(e) => { e.preventDefault(); if (scope.officeIds?.length) onConfirm(scope.officeIds); }}>
+      <ScopePicker me={me} role={user.role} value={scope} onChange={setScope} lockCompany />
     </Frame>
   );
 }

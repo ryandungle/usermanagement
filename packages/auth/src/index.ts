@@ -3,9 +3,9 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { adminAc, defaultStatements, userAc } from "better-auth/plugins/admin/access";
-import { createDb, schema, type Database } from "@usermanagement/db";
+import { createDb, eq, schema, userOffice, type Database } from "@usermanagement/db";
 import type { Actor, Role, Scope } from "@usermanagement/shared";
-import { isRole } from "@usermanagement/shared";
+import { ROLE_LEVEL, isRole } from "@usermanagement/shared";
 
 export interface AuthEnv {
   /** Neon connection string. */
@@ -62,7 +62,6 @@ export function buildAuth(env: AuthEnv, db: Database = createDb(env.DATABASE_URL
       additionalFields: {
         clientId: { type: "string", required: false, input: false },
         companyId: { type: "string", required: false, input: false },
-        officeId: { type: "string", required: false, input: false },
       },
     },
     plugins: [
@@ -86,15 +85,17 @@ export type Auth = ReturnType<typeof buildAuth>;
 export type AuthSession = Auth["$Infer"]["Session"];
 export type SessionUser = AuthSession["user"];
 
-/** Build the RBAC actor from a Better Auth session user. */
-export function actorFromUser(u: SessionUser): Actor {
-  return {
-    id: u.id,
-    role: isRole(u.role) ? u.role : "user",
-    clientId: u.clientId ?? null,
-    companyId: u.companyId ?? null,
-    officeId: u.officeId ?? null,
-  };
+/**
+ * Build the RBAC actor from a Better Auth session user. Office memberships are
+ * loaded from user_office for office-level roles (one small query).
+ */
+export async function actorFromUser(db: Database, u: SessionUser): Promise<Actor> {
+  const role: Role = isRole(u.role) ? u.role : "user";
+  const officeIds =
+    ROLE_LEVEL[role] === "office"
+      ? (await db.select({ officeId: userOffice.officeId }).from(userOffice).where(eq(userOffice.userId, u.id))).map((r) => r.officeId)
+      : [];
+  return { id: u.id, role, clientId: u.clientId ?? null, companyId: u.companyId ?? null, officeIds };
 }
 
 export interface CreateManagedUserInput extends Scope {
@@ -109,7 +110,7 @@ export interface CreateManagedUserInput extends Scope {
  * sign-up endpoint (which is disabled) but still uses Better Auth's own
  * password hasher and adapter so the account is fully compatible with sign-in.
  */
-export async function createManagedUser(auth: Auth, input: CreateManagedUserInput) {
+export async function createManagedUser(auth: Auth, db: Database, input: CreateManagedUserInput) {
   const ctx = await auth.$context;
   const hashed = await ctx.password.hash(input.password);
   const created = await ctx.internalAdapter.createUser({
@@ -119,7 +120,6 @@ export async function createManagedUser(auth: Auth, input: CreateManagedUserInpu
     role: input.role,
     clientId: input.clientId,
     companyId: input.companyId,
-    officeId: input.officeId,
   }, { method: "admin" });
   await ctx.internalAdapter.linkAccount({
     userId: created.id,
@@ -127,7 +127,16 @@ export async function createManagedUser(auth: Auth, input: CreateManagedUserInpu
     accountId: created.id,
     password: hashed,
   });
+  await setUserOffices(db, created.id, input.officeIds);
   return created;
+}
+
+/** Replace a user's office memberships. */
+export async function setUserOffices(db: Database, userId: string, officeIds: string[]) {
+  await db.delete(userOffice).where(eq(userOffice.userId, userId));
+  if (officeIds.length > 0) {
+    await db.insert(userOffice).values(officeIds.map((officeId) => ({ userId, officeId })));
+  }
 }
 
 /**

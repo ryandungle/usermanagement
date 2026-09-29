@@ -1,5 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { actorFromUser, getAuth } from "@usermanagement/auth";
+import { createDb } from "@usermanagement/db";
 import { hasRank, type Actor, type Role } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
 
@@ -9,7 +10,7 @@ export const sessionMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const result = await auth.api.getSession({ headers: c.req.raw.headers });
   c.set("user", result?.user ?? null);
   c.set("session", result?.session ?? null);
-  c.set("actor", result?.user ? actorFromUser(result.user) : null);
+  c.set("actor", result?.user ? await actorFromUser(createDb(c.env.DATABASE_URL), result.user) : null);
   await next();
 });
 

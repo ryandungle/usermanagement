@@ -1,14 +1,21 @@
 import { Hono } from "hono";
-import { and, client, company, count, createDb, eq, office, session, sql, user } from "@usermanagement/db";
+import { and, client, company, count, createDb, eq, exists, inArray, office, session, sql, user, userOffice } from "@usermanagement/db";
 import type { Actor } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
 import { getActor, requireRank } from "../middleware/auth.js";
 
-function scopeWhere(actor: Actor) {
+function scopeWhere(db: ReturnType<typeof createDb>, actor: Actor) {
   return and(
     actor.clientId ? eq(user.clientId, actor.clientId) : undefined,
     actor.companyId ? eq(user.companyId, actor.companyId) : undefined,
-    actor.officeId ? eq(user.officeId, actor.officeId) : undefined,
+    actor.officeIds.length
+      ? exists(
+          db
+            .select({ one: sql`1` })
+            .from(userOffice)
+            .where(and(eq(userOffice.userId, user.id), inArray(userOffice.officeId, actor.officeIds))),
+        )
+      : undefined,
   );
 }
 
@@ -20,8 +27,8 @@ export const statsRoute = new Hono<AppEnv>().use("*", requireRank("office_manage
   since.setUTCHours(0, 0, 0, 0);
 
   const [[users], [banned], [clients], [companies], [offices], newUsers, sessions] = await Promise.all([
-    db.select({ n: count() }).from(user).where(scopeWhere(actor)),
-    db.select({ n: count() }).from(user).where(and(scopeWhere(actor), eq(user.banned, true))),
+    db.select({ n: count() }).from(user).where(scopeWhere(db, actor)),
+    db.select({ n: count() }).from(user).where(and(scopeWhere(db, actor), eq(user.banned, true))),
     db.select({ n: count() }).from(client).where(actor.clientId ? eq(client.id, actor.clientId) : undefined),
     db
       .select({ n: count() })
@@ -40,19 +47,19 @@ export const statsRoute = new Hono<AppEnv>().use("*", requireRank("office_manage
         and(
           actor.clientId ? eq(company.clientId, actor.clientId) : undefined,
           actor.companyId ? eq(office.companyId, actor.companyId) : undefined,
-          actor.officeId ? eq(office.id, actor.officeId) : undefined,
+          actor.officeIds.length ? inArray(office.id, actor.officeIds) : undefined,
         ),
       ),
     db
       .select({ day: sql<string>`to_char(${user.createdAt}, 'YYYY-MM-DD')`, n: count() })
       .from(user)
-      .where(and(scopeWhere(actor), sql`${user.createdAt} >= ${since}`))
+      .where(and(scopeWhere(db, actor), sql`${user.createdAt} >= ${since}`))
       .groupBy(sql`1`),
     db
       .select({ day: sql<string>`to_char(${session.createdAt}, 'YYYY-MM-DD')`, n: count() })
       .from(session)
       .innerJoin(user, eq(user.id, session.userId))
-      .where(and(scopeWhere(actor), sql`${session.createdAt} >= ${since}`))
+      .where(and(scopeWhere(db, actor), sql`${session.createdAt} >= ${since}`))
       .groupBy(sql`1`),
   ]);
 

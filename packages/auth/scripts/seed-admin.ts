@@ -42,19 +42,19 @@ const [existing] = await db.select({ id: user.id, role: user.role }).from(user).
 if (existing) {
   await db
     .update(user)
-    .set({ role: "app_admin", clientId: null, companyId: null, officeId: null })
+    .set({ role: "app_admin", clientId: null, companyId: null })
     .where(eq(user.id, existing.id));
   console.log(`Promoted existing user ${email} (${existing.id}) to app_admin.`);
 } else {
   if (password.length < 8) fail("Password must be at least 8 characters.");
-  const created = await createManagedUser(auth, {
+  const created = await createManagedUser(auth, db, {
     name,
     email,
     password,
     role: "app_admin",
     clientId: null,
     companyId: null,
-    officeId: null,
+    officeIds: [],
   });
   console.log(`Created app_admin ${created.email} (${created.id}).`);
 }

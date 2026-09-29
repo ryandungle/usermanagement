@@ -30,7 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError, type ListUsersParams, type ManagedUser, type Me, type Pagination } from "@/lib/api";
-import { BanDialog, ConfirmDialog, CreateUserDialog, EditUserDialog, PasswordDialog, RoleDialog } from "./user-dialogs";
+import { BanDialog, ConfirmDialog, CreateUserDialog, EditUserDialog, OfficesDialog, PasswordDialog, RoleDialog } from "./user-dialogs";
 
 type ColumnKey = "email" | "role" | "scope" | "status" | "createdAt";
 const COLUMNS: { key: ColumnKey; label: string }[] = [
@@ -45,6 +45,7 @@ type DialogState =
   | { kind: "create" }
   | { kind: "edit"; user: ManagedUser }
   | { kind: "role"; user: ManagedUser }
+  | { kind: "offices"; user: ManagedUser }
   | { kind: "password"; user: ManagedUser }
   | { kind: "ban"; user: ManagedUser }
   | { kind: "delete"; user: ManagedUser }
@@ -216,7 +217,7 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
             ) : (
               users.map((u) => {
                 const isMe = u.id === me.actor.id;
-                const manageable = canManageUser(me.actor, { id: u.id, role: u.role, clientId: u.clientId, companyId: u.companyId, officeId: u.officeId });
+                const manageable = canManageUser(me.actor, { id: u.id, role: u.role, clientId: u.clientId, companyId: u.companyId, officeIds: u.offices.map((o) => o.id) });
                 return (
                   <TableRow key={u.id} data-state={selected.has(u.id) ? "selected" : undefined}>
                     <TableCell>
@@ -273,6 +274,9 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
                           <DropdownMenuContent align="end" className="w-40">
                             <DropdownMenuItem onClick={() => setDialog({ kind: "edit", user: u })}>Edit</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setDialog({ kind: "role", user: u })}>Change role</DropdownMenuItem>
+                            {(u.role === "user" || u.role === "office_manager") && (
+                              <DropdownMenuItem onClick={() => setDialog({ kind: "offices", user: u })}>Offices</DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => setDialog({ kind: "password", user: u })}>Reset password</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => run(() => api.revokeSessions(u.id))}>Sign out everywhere</DropdownMenuItem>
                             <DropdownMenuSeparator />
@@ -329,13 +333,16 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
       </div>
 
       {dialog?.kind === "create" && (
-        <CreateUserDialog me={me} initialScope={scope} onClose={() => setDialog(null)} onConfirm={(d) => { setDialog(null); void run(() => api.createUser(d)); }} />
+        <CreateUserDialog me={me} initialScope={{ clientId: scope.clientId, companyId: scope.companyId, officeIds: scope.officeId ? [scope.officeId] : [] }} onClose={() => setDialog(null)} onConfirm={(d) => { setDialog(null); void run(() => api.createUser(d)); }} />
       )}
       {dialog?.kind === "edit" && (
         <EditUserDialog user={dialog.user} onClose={() => setDialog(null)} onConfirm={(d) => { setDialog(null); void run(() => api.updateUser(dialog.user.id, d)); }} />
       )}
       {dialog?.kind === "role" && (
         <RoleDialog me={me} user={dialog.user} onClose={() => setDialog(null)} onConfirm={(d) => { setDialog(null); void run(() => api.setRole(dialog.user.id, d)); }} />
+      )}
+      {dialog?.kind === "offices" && (
+        <OfficesDialog me={me} user={dialog.user} onClose={() => setDialog(null)} onConfirm={(ids) => { setDialog(null); void run(() => api.setOffices(dialog.user.id, ids)); }} />
       )}
       {dialog?.kind === "password" && (
         <PasswordDialog user={dialog.user} onClose={() => setDialog(null)} onConfirm={(p) => { setDialog(null); void run(() => api.setPassword(dialog.user.id, p)); }} />
@@ -357,6 +364,6 @@ export function UsersTable({ me, scope, openCreate, onCreateHandled, onChanged }
 }
 
 function scopeText(u: ManagedUser) {
-  const parts = [u.clientName, u.companyName, u.officeName].filter(Boolean);
+  const parts = [u.clientName, u.companyName, u.offices.map((o) => o.name).join(", ") || null].filter(Boolean);
   return parts.length ? parts.join(" › ") : "Global";
 }

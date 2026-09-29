@@ -47,7 +47,7 @@ export const clientsRoute = new Hono<AppEnv>()
     const params = idParam.safeParse(c.req.param());
     if (!params.success) return c.json({ error: "Invalid id" }, 400);
     const actor = getActor(c);
-    if (!scopeContains(actor, { clientId: params.data.id, companyId: actor.companyId, officeId: actor.officeId })) {
+    if (!scopeContains(actor, { clientId: params.data.id, companyId: actor.companyId, officeIds: actor.officeIds })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     const db = createDb(c.env.DATABASE_URL);

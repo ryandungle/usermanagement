@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { APIError } from "better-auth/api";
 import { getAuth } from "@usermanagement/auth";
-import { client, company, createDb, eq, office } from "@usermanagement/db";
+import { client, company, createDb, eq, inArray, office } from "@usermanagement/db";
 import { ROLE_LEVEL, assignableRoles, hasRank } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
 import { getActor, requireAuth } from "../middleware/auth.js";
@@ -22,10 +22,10 @@ export const meRoute = new Hono<AppEnv>()
   .get("/", async (c) => {
     const actor = getActor(c);
     const db = createDb(c.env.DATABASE_URL);
-    const [clientRow, companyRow, officeRow] = await Promise.all([
+    const [clientRow, companyRow, officeRows] = await Promise.all([
       actor.clientId ? db.select({ name: client.name }).from(client).where(eq(client.id, actor.clientId)) : [],
       actor.companyId ? db.select({ name: company.name }).from(company).where(eq(company.id, actor.companyId)) : [],
-      actor.officeId ? db.select({ name: office.name }).from(office).where(eq(office.id, actor.officeId)) : [],
+      actor.officeIds.length ? db.select({ id: office.id, name: office.name }).from(office).where(inArray(office.id, actor.officeIds)) : [],
     ]);
 
     return c.json({
@@ -36,7 +36,7 @@ export const meRoute = new Hono<AppEnv>()
         level: ROLE_LEVEL[actor.role],
         clientName: clientRow[0]?.name ?? null,
         companyName: companyRow[0]?.name ?? null,
-        officeName: officeRow[0]?.name ?? null,
+        offices: officeRows,
       },
       permissions: {
         assignableRoles: assignableRoles(actor),

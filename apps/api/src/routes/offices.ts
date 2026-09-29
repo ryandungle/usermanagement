@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, asc, client, company, count, createDb, eq, office, user } from "@usermanagement/db";
+import { and, asc, client, company, count, createDb, eq, inArray, office, userOffice } from "@usermanagement/db";
 import { scopeContains } from "@usermanagement/shared";
 import type { AppEnv } from "../env.js";
-import { resolveCompany, resolveOffice } from "../lib/scope.js";
+import { officeAsScope, resolveCompany, resolveOffice } from "../lib/scope.js";
 import { getActor, requireAuth, requireRank } from "../middleware/auth.js";
 
 const idParam = z.object({ id: z.uuid() });
@@ -35,17 +35,17 @@ export const officesRoute = new Hono<AppEnv>()
         name: office.name,
         createdAt: office.createdAt,
         updatedAt: office.updatedAt,
-        userCount: count(user.id),
+        userCount: count(userOffice.userId),
       })
       .from(office)
       .innerJoin(company, eq(company.id, office.companyId))
       .innerJoin(client, eq(client.id, company.clientId))
-      .leftJoin(user, eq(user.officeId, office.id))
+      .leftJoin(userOffice, eq(userOffice.officeId, office.id))
       .where(
         and(
           companyId ? eq(office.companyId, companyId) : undefined,
           clientId ? eq(company.clientId, clientId) : undefined,
-          actor.officeId ? eq(office.id, actor.officeId) : undefined,
+          actor.officeIds.length ? inArray(office.id, actor.officeIds) : undefined,
         ),
       )
       .groupBy(office.id, company.name, company.clientId, client.name)
@@ -59,7 +59,7 @@ export const officesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const parent = await resolveCompany(db, parsed.data.companyId);
     if (!parent) return c.json({ error: "Company not found" }, 404);
-    if (!scopeContains(getActor(c), { clientId: parent.clientId, companyId: parent.companyId, officeId: null })) {
+    if (!scopeContains(getActor(c), { clientId: parent.clientId, companyId: parent.companyId, officeIds: [] })) {
       return c.json({ error: "Forbidden" }, 403);
     }
     const [row] = await db
@@ -75,7 +75,7 @@ export const officesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const row = await resolveOffice(db, params.data.id);
     if (!row) return c.json({ error: "Office not found" }, 404);
-    if (!scopeContains(getActor(c), row)) return c.json({ error: "Forbidden" }, 403);
+    if (!scopeContains(getActor(c), officeAsScope(row))) return c.json({ error: "Forbidden" }, 403);
     return c.json({
       data: {
         id: row.officeId,
@@ -96,7 +96,7 @@ export const officesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const existing = await resolveOffice(db, params.data.id);
     if (!existing) return c.json({ error: "Office not found" }, 404);
-    if (!scopeContains(getActor(c), existing)) return c.json({ error: "Forbidden" }, 403);
+    if (!scopeContains(getActor(c), officeAsScope(existing))) return c.json({ error: "Forbidden" }, 403);
     const [row] = await db.update(office).set({ name: parsed.data.name }).where(eq(office.id, params.data.id)).returning();
     return c.json({ data: row });
   })
@@ -107,7 +107,7 @@ export const officesRoute = new Hono<AppEnv>()
     const db = createDb(c.env.DATABASE_URL);
     const existing = await resolveOffice(db, params.data.id);
     if (!existing) return c.json({ error: "Office not found" }, 404);
-    if (!scopeContains(getActor(c), existing)) return c.json({ error: "Forbidden" }, 403);
+    if (!scopeContains(getActor(c), officeAsScope(existing))) return c.json({ error: "Forbidden" }, 403);
     await db.delete(office).where(eq(office.id, params.data.id));
     return c.json({ data: { success: true } });
   });
