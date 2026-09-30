@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { SiteHeader } from "@/components/site-header";
 import { ConnectorCard, StatusBadge } from "@/components/office/connector-card";
-import { CollectionBrowser } from "@/components/office/collection-browser";
 import { PmsSettingsCard } from "@/components/office/pms-settings-card";
 import { api, ApiError, type ManagedUser, type Office, type OfficeConnector } from "@/lib/api";
 import { useMe } from "@/lib/me";
@@ -124,7 +123,6 @@ export function OfficeDetailPage({ officeId }: { officeId: string }) {
 
         {connector && connector.status === "ok" && <PmsSettingsCard officeId={officeId} connector={connector} onChange={setConnector} />}
 
-        {connector && connector.status === "ok" && <CollectionBrowser key={connector.updatedAt} officeId={officeId} />}
       </div>
     </>
   );
